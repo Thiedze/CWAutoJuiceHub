@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>CWAutoJuiceHub</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header>
+    <button id="home-btn" class="icon" aria-label="Home">&#8962;</button>
+    <h1>CWAutoJuiceHub</h1>
+    <span id="hub-badge" class="badge offline">hub offline</span>
+    <button id="settings-btn" class="icon" aria-label="Settings">&#9881;</button>
+  </header>
+
+  <main>
+    <section id="view-home" class="view">
+      <div class="tiles">
+        <button class="tile" data-alcoholic="true"><span class="emoji">&#127864;</span>With alcohol</button>
+        <button class="tile" data-alcoholic="false"><span class="emoji">&#129475;</span>Without alcohol</button>
+      </div>
+    </section>
+
+    <section id="view-list" class="view" hidden>
+      <h2 id="list-title"></h2>
+      <ul id="recipe-list" class="cards"></ul>
+    </section>
+
+    <section id="view-customize" class="view" hidden>
+      <h2 id="custom-title"></h2>
+      <label id="strength-row">Strength <output id="strength-out">100%</output>
+        <input id="strength" type="range" min="0.5" max="1.5" step="0.1" value="1">
+      </label>
+      <ol id="plan-steps" class="steps"></ol>
+      <p id="plan-total" class="muted"></p>
+      <button id="start-btn" class="primary">Make it</button>
+    </section>
+
+    <section id="view-run" class="view" hidden>
+      <h2 id="run-title"></h2>
+      <p id="run-message" class="message"></p>
+      <div id="run-progress" class="progress" hidden><div class="bar"></div><span class="label"></span></div>
+      <p class="muted">Scale: <span id="scale-g">0</span> g</p>
+      <ol id="run-steps" class="steps"></ol>
+      <div class="actions">
+        <button id="next-btn" class="primary">Next</button>
+        <button id="abort-btn" class="danger">Abort</button>
+      </div>
+    </section>
+
+    <section id="view-settings" class="view" hidden>
+      <h2>Bays</h2>
+      <div id="bay-grid" class="bay-grid"></div>
+    </section>
+
+    <dialog id="bay-dialog">
+      <form method="dialog">
+        <h3 id="bay-dialog-title"></h3>
+        <p id="bay-dialog-text"></p>
+        <label>Liquid <select id="bay-ingredient"></select></label>
+        <label>Approx. volume (ml) <input id="bay-volume" type="number" min="1" max="5000" value="700"></label>
+        <div class="actions">
+          <button value="confirm" class="primary" id="bay-confirm">Bottle inserted</button>
+          <button value="cancel" id="bay-cancel">Cancel</button>
+        </div>
+      </form>
+    </dialog>
+  </main>
+
+  <div id="toast" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

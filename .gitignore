@@ -169,3 +169,10 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+.claude/.planning/
+
+# CWAutoJuiceHub
+*.db
+firmware/.pio/
+firmware/src/secrets.h
