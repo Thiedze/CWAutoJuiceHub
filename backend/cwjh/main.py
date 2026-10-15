@@ -4,6 +4,7 @@
     CWJH_MQTT_HOST=sim uvicorn cwjh.main:app      # no broker, no hardware: in-process simulator
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,6 +16,7 @@ from .api import Broadcaster, router
 from .config import Settings
 from .db import init_db, make_engine
 from .mqtt_link import HubLink
+from .mqtt_log import MqttLog, TapTransport
 from .seed import seed
 from .services.bays import BayService
 from .services.cocktail import CocktailService
@@ -51,8 +53,9 @@ def create_app(settings: Settings | None = None, transport: Transport | None = N
             with sessions.begin() as session:
                 seed(session)
 
-        hub = HubLink(transport, default_timeout_s=settings.ack_timeout_s)
         broadcaster = Broadcaster()
+        mqtt_log = MqttLog(asyncio.get_running_loop(), lambda entry: broadcaster.publish("mqtt", entry))
+        hub = HubLink(TapTransport(transport, mqtt_log.record), default_timeout_s=settings.ack_timeout_s)
         cocktail = CocktailService(sessions, hub, settings)
         hub.add_listener(broadcaster.publish)
         cocktail.add_listener(lambda status: broadcaster.publish("cocktail", status))
@@ -63,6 +66,7 @@ def create_app(settings: Settings | None = None, transport: Transport | None = N
         app.state.bays = BayService(sessions, hub)
         app.state.cocktail = cocktail
         app.state.broadcaster = broadcaster
+        app.state.mqtt_log = mqtt_log
         app.state.sim = sim
 
         await hub.start()

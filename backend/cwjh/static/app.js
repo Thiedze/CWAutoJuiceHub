@@ -132,6 +132,8 @@ function renderCocktail(status) {
   progress.querySelector(".bar").style.width = `${pct}%`;
   progress.querySelector(".label").textContent = target ? `${Math.round(grams)} / ${Math.round(target)} g` : "";
 
+  if (status.phase === "pouring" && state.pourBaseG != null) showScale(state.pourBaseG + grams);
+
   $("#run-steps").replaceChildren(...status.plan.steps.map(stepItem));
   const waiting = ["await_glass", "await_manual", "done", "error"].includes(status.phase);
   $("#next-btn").disabled = !waiting;
@@ -209,7 +211,95 @@ async function fillBay(bay) {
   };
 }
 
+// MQTT panel: every message between the Pi and the hub
+
+const mqtt = { count: 0, progressRow: null };
+
+function mqttPrefs() {
+  try { return JSON.parse(localStorage.getItem("cwjh.mqtt") || "{}"); } catch { return {}; }
+}
+function saveMqttPrefs() {
+  try {
+    localStorage.setItem("cwjh.mqtt", JSON.stringify({
+      open: !$("#mqtt-panel").classList.contains("collapsed"),
+      progress: $("#mqtt-progress").checked,
+      state: $("#mqtt-state").checked,
+    }));
+  } catch {}
+}
+(function restoreMqttPrefs() {
+  const p = mqttPrefs();
+  if (new URLSearchParams(location.search).has("mqtt")) p.open = true;
+  if (p.open) { $("#mqtt-panel").classList.remove("collapsed"); document.body.classList.add("mqtt-open"); }
+  if (p.progress === false) $("#mqtt-progress").checked = false;
+  if (p.state) $("#mqtt-state").checked = true;
+})();
+
+$("#mqtt-toggle").addEventListener("click", () => {
+  const open = $("#mqtt-panel").classList.toggle("collapsed") === false;
+  document.body.classList.toggle("mqtt-open", open);
+  saveMqttPrefs();
+});
+["#mqtt-progress", "#mqtt-state"].forEach((s) => $(s).addEventListener("change", () => { saveMqttPrefs(); applyMqttFilter(); }));
+$("#mqtt-clear").addEventListener("click", () => {
+  $("#mqtt-list").replaceChildren();
+  mqtt.count = 0;
+  mqtt.progressRow = null;
+  $("#mqtt-count").textContent = "0 messages";
+});
+
+function applyMqttFilter() {
+  const showProgress = $("#mqtt-progress").checked;
+  const showState = $("#mqtt-state").checked;
+  document.querySelectorAll("#mqtt-list li").forEach((li) => {
+    li.hidden = (li.dataset.kind === "progress" && !showProgress) || (li.dataset.kind === "state" && !showState);
+  });
+}
+
+function mqttKind(topic) {
+  if (topic.endsWith("/progress")) return "progress";
+  if (topic.endsWith("/state")) return "state";
+  return "other";
+}
+
+function addMqtt(entry) {
+  const list = $("#mqtt-list");
+  const kind = mqttKind(entry.topic);
+  const time = new Date(entry.t * 1000).toTimeString().slice(0, 8);
+  const short = entry.topic.replace(/^cwjh\//, "");
+  const isErr = entry.payload.includes('"status":"error"');
+  const isCmd = entry.dir === "out" && short.startsWith("cmd/") && short !== "cmd/state";
+
+  // Fold a run of progress messages into one row that updates in place.
+  if (kind === "progress" && mqtt.progressRow && list.lastElementChild === mqtt.progressRow) {
+    const row = mqtt.progressRow;
+    row.querySelector(".time").textContent = time;
+    row.querySelector(".payload").textContent = `${entry.payload}  (x${++row.dataset.n})`;
+    return;
+  }
+
+  mqtt.count += 1;
+  $("#mqtt-count").textContent = `${mqtt.count} messages`;
+  const li = el("li", { className: `${entry.dir}${isErr ? " err" : ""}${isCmd ? " cmd" : ""}` },
+    el("span", { className: "time", textContent: time }),
+    el("span", { className: "dir", textContent: entry.dir === "out" ? "Pi → hub" : "hub → Pi" }),
+    el("span", { className: "topic", textContent: short }),
+    el("span", { className: "payload", textContent: entry.payload })
+  );
+  li.dataset.kind = kind;
+  if (kind === "progress") { li.dataset.n = 1; mqtt.progressRow = li; }
+  list.append(li);
+  while (list.children.length > 400) list.firstElementChild.remove();
+  applyMqttFilter();
+  const body = list;
+  if (body.scrollHeight - body.scrollTop - body.clientHeight < 80) body.scrollTop = body.scrollHeight;
+}
+
 // Live updates
+
+function showScale(grams) {
+  $("#scale-g").textContent = Math.round(grams);
+}
 
 function setOnline(online) {
   state.hubOnline = online;
@@ -223,8 +313,20 @@ function connect() {
   ws.onmessage = (event) => {
     const { type, data } = JSON.parse(event.data);
     if (type === "online") setOnline(data);
-    if (type === "state") $("#scale-g").textContent = Math.round(data.scale_g);
+    if (type === "state") {
+      // Hub state is only sent at the start and end of a pour; in between, the scale is
+      // the weight at the start plus the pour progress.
+      state.pourBaseG = data.busy ? data.scale_g : null;
+      showScale(data.scale_g);
+    }
     if (type === "cocktail") renderCocktail(data);
+    if (type === "mqtt") addMqtt(data);
+  };
+  ws.onopen = async () => {
+    $("#mqtt-list").replaceChildren();
+    mqtt.count = 0;
+    mqtt.progressRow = null;
+    try { (await api("/mqtt")).forEach(addMqtt); } catch {}
   };
   ws.onclose = () => {
     setOnline(false);

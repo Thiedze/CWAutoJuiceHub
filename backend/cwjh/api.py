@@ -69,6 +69,12 @@ def status(request: Request) -> dict[str, Any]:
     }
 
 
+@router.get("/mqtt")
+def mqtt_messages(request: Request) -> list[dict[str, Any]]:
+    """The last MQTT messages between the Pi and the hub, oldest first."""
+    return list(_services(request).mqtt_log.entries)
+
+
 @router.get("/ingredients")
 def ingredients(request: Request) -> list[dict[str, Any]]:
     with _services(request).sessions() as session:

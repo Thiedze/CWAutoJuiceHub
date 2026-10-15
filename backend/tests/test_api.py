@@ -93,3 +93,14 @@ def test_next_without_cocktail_is_conflict(client):
     assert phase(client) == "idle"
     wait(lambda: client.get("/api/status").json()["hub_online"])
     assert client.post("/api/cocktail/start", json={"recipe_id": 9999}).status_code == 400
+
+
+def test_mqtt_log_shows_commands_and_acks(client):
+    wait(lambda: client.get("/api/status").json()["hub_online"])
+    fill(client, 3, "Vodka")
+    log = client.get("/api/mqtt").json()
+    moves = [m for m in log if m["topic"] == "cwjh/cmd/move"]
+    assert [m["dir"] for m in moves] == ["out", "out"]
+    assert '"degrees":30.0' in moves[0]["payload"] and '"degrees":0.0' in moves[1]["payload"]
+    acks = [m for m in log if m["topic"] == "cwjh/hub/ack" and m["dir"] == "in"]
+    assert any('"status":"done"' in a["payload"] for a in acks)

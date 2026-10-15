@@ -68,6 +68,22 @@
     </dialog>
   </main>
 
+  <aside id="mqtt-panel" class="collapsed">
+    <button id="mqtt-toggle" class="mqtt-head">
+      <span>MQTT</span>
+      <span id="mqtt-count" class="muted">0 messages</span>
+      <span class="chevron" aria-hidden="true">&#9650;</span>
+    </button>
+    <div class="mqtt-body">
+      <div class="mqtt-tools">
+        <label><input type="checkbox" id="mqtt-progress" checked> progress</label>
+        <label><input type="checkbox" id="mqtt-state"> state</label>
+        <button id="mqtt-clear">Clear</button>
+      </div>
+      <ol id="mqtt-list"></ol>
+    </div>
+  </aside>
+
   <div id="toast" hidden></div>
   <script src="app.js"></script>
 </body>
