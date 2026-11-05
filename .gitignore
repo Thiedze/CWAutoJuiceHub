@@ -174,5 +174,5 @@ cython_debug/
 
 # CWAutoJuiceHub
 *.db
-firmware/.pio/
+firmware/**/.pio/
 firmware/src/secrets.h
