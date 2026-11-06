@@ -1,7 +1,7 @@
 """App factory.
 
-    uvicorn cwjh.main:app                         # real broker (CWJH_MQTT_HOST, default localhost)
-    CWJH_MQTT_HOST=sim uvicorn cwjh.main:app      # no broker, no hardware: in-process simulator
+    uvicorn cwjh.main:app                          # Nano on the first USB serial port
+    CWJH_SERIAL_PORT=sim uvicorn cwjh.main:app     # no hardware: in-process simulated Nano
 """
 
 import asyncio
@@ -15,35 +15,28 @@ from fastapi.staticfiles import StaticFiles
 from .api import Broadcaster, router
 from .config import Settings
 from .db import init_db, make_engine
-from .mqtt_link import HubLink
-from .mqtt_log import MqttLog, TapTransport
+from .hub import Hub
+from .nano_link import Line, NanoLink, SerialLine
 from .seed import seed
+from .serial_log import SerialLog
 from .services.bays import BayService
 from .services.cocktail import CocktailService
-from .sim.hub_sim import HubSim
-from .transport import LocalBroker, PahoTransport, Transport
+from .sim.nano_sim import NanoSim
 
 log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 
 
-def create_app(settings: Settings | None = None, transport: Transport | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, line: Line | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
-    sim: HubSim | None = None
+    sim: NanoSim | None = None
 
-    if transport is None:
-        if settings.mqtt_host == "sim":
-            broker = LocalBroker()
-            sim = HubSim(broker.client())
-            transport = broker.client()
+    if line is None:
+        if settings.serial_port == "sim":
+            sim = NanoSim(bays=settings.sim_bays, steps_per_s=settings.step_rate)
+            line = sim.line()
         else:
-            transport = PahoTransport(
-                settings.mqtt_host,
-                settings.mqtt_port,
-                settings.mqtt_username,
-                settings.mqtt_password,
-                client_id="cwjh-backend",
-            )
+            line = SerialLine(settings.serial_port)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -54,8 +47,8 @@ def create_app(settings: Settings | None = None, transport: Transport | None = N
                 seed(session)
 
         broadcaster = Broadcaster()
-        mqtt_log = MqttLog(asyncio.get_running_loop(), lambda entry: broadcaster.publish("mqtt", entry))
-        hub = HubLink(TapTransport(transport, mqtt_log.record), default_timeout_s=settings.ack_timeout_s)
+        serial_log = SerialLog(asyncio.get_running_loop(), lambda entry: broadcaster.publish("serial", entry))
+        hub = Hub(NanoLink(line, tap=serial_log.record), settings)
         cocktail = CocktailService(sessions, hub, settings)
         hub.add_listener(broadcaster.publish)
         cocktail.add_listener(lambda status: broadcaster.publish("cocktail", status))
@@ -66,19 +59,16 @@ def create_app(settings: Settings | None = None, transport: Transport | None = N
         app.state.bays = BayService(sessions, hub)
         app.state.cocktail = cocktail
         app.state.broadcaster = broadcaster
-        app.state.mqtt_log = mqtt_log
+        app.state.serial_log = serial_log
         app.state.sim = sim
 
-        await hub.start()
         if sim:
-            sim.start()
-            log.info("running with the in-process hub simulator")
+            log.info("running with the in-process simulated Nano")
+        await hub.start()
         try:
             yield
         finally:
             await cocktail.abort()
-            if sim:
-                sim.stop()
             hub.stop()
             engine.dispose()
 

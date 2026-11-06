@@ -68,19 +68,18 @@
     </dialog>
   </main>
 
-  <aside id="mqtt-panel" class="collapsed">
-    <button id="mqtt-toggle" class="mqtt-head">
-      <span>MQTT</span>
-      <span id="mqtt-count" class="muted">0 messages</span>
+  <aside id="serial-panel" class="collapsed">
+    <button id="serial-toggle" class="serial-head">
+      <span>Serial</span>
+      <span id="serial-count" class="muted">0 lines</span>
       <span class="chevron" aria-hidden="true">&#9650;</span>
     </button>
-    <div class="mqtt-body">
-      <div class="mqtt-tools">
-        <label><input type="checkbox" id="mqtt-progress" checked> progress</label>
-        <label><input type="checkbox" id="mqtt-state"> state</label>
-        <button id="mqtt-clear">Clear</button>
+    <div class="serial-body">
+      <div class="serial-tools">
+        <label><input type="checkbox" id="serial-status"> pings (Q / STATE)</label>
+        <button id="serial-clear">Clear</button>
       </div>
-      <ol id="mqtt-list"></ol>
+      <ol id="serial-list"></ol>
     </div>
   </aside>
 

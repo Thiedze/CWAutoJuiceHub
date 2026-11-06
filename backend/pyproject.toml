@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cwjh"
-version = "0.1.0"
+version = "0.2.0"
 description = "Raspberry Pi backend for the CWAutoJuiceHub cocktail machine"
 requires-python = ">=3.11"
 dependencies = [
@@ -12,7 +12,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "sqlalchemy>=2.0",
     "pydantic>=2.7",
-    "paho-mqtt>=2.1",
+    "pyserial>=3.5",
 ]
 
 [project.optional-dependencies]

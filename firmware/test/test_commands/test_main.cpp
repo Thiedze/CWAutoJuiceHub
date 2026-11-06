@@ -3,151 +3,106 @@
 #include <unity.h>
 
 #include "commands.h"
-#include "pour.h"
 
 using namespace cwjh;
-
-static ParseResult parse(const char* topic, const char* json, Command& cmd) {
-  return parseCommand(topic, reinterpret_cast<const uint8_t*>(json), strlen(json), cmd);
-}
 
 void setUp() {}
 void tearDown() {}
 
-void test_parses_pour() {
-  Command cmd;
-  TEST_ASSERT_EQUAL(ParseResult::Ok, parse("cwjh/cmd/pour", R"({"id":"a1","bay":3,"ml":50,"g_per_ml":1.3})", cmd));
-  TEST_ASSERT_EQUAL(CommandType::Pour, cmd.type);
-  TEST_ASSERT_EQUAL_STRING("a1", cmd.id);
-  TEST_ASSERT_EQUAL(3, cmd.bay);
-  TEST_ASSERT_FLOAT_WITHIN(0.001, 50.0, cmd.ml);
-  TEST_ASSERT_FLOAT_WITHIN(0.001, 1.3, cmd.g_per_ml);
+void test_parses_go() {
+  Request r;
+  TEST_ASSERT_EQUAL(ParseResult::Ok, parseRequest("7 G 1 -400", r));
+  TEST_ASSERT_EQUAL(7, r.seq);
+  TEST_ASSERT_TRUE(r.op == Op::Go);
+  TEST_ASSERT_EQUAL(1, r.bay);
+  TEST_ASSERT_EQUAL(-400, r.value);
 }
 
-void test_pour_density_defaults_to_water() {
-  Command cmd;
-  TEST_ASSERT_EQUAL(ParseResult::Ok, parse("cwjh/cmd/pour", R"({"id":"a","bay":1,"ml":10})", cmd));
-  TEST_ASSERT_FLOAT_WITHIN(0.001, 1.0, cmd.g_per_ml);
+void test_parses_other_requests() {
+  Request r;
+  TEST_ASSERT_EQUAL(ParseResult::Ok, parseRequest("1 S", r));
+  TEST_ASSERT_TRUE(r.op == Op::Stop);
+  TEST_ASSERT_EQUAL(ParseResult::Ok, parseRequest("2 Q", r));
+  TEST_ASSERT_TRUE(r.op == Op::Query);
+  TEST_ASSERT_EQUAL(ParseResult::Ok, parseRequest("3 V 250", r));
+  TEST_ASSERT_TRUE(r.op == Op::Speed);
+  TEST_ASSERT_EQUAL(250, r.value);
+  TEST_ASSERT_EQUAL(ParseResult::Ok, parseRequest("4 H 12 1", r));
+  TEST_ASSERT_TRUE(r.op == Op::Hold);
+  TEST_ASSERT_EQUAL(12, r.bay);
+  TEST_ASSERT_EQUAL(1, r.value);
 }
 
-void test_rejects_bad_pours() {
-  Command cmd;
+void test_tolerates_extra_spaces() {
+  Request r;
+  TEST_ASSERT_EQUAL(ParseResult::Ok, parseRequest("  65535   G  2  30  ", r));
+  TEST_ASSERT_EQUAL(65535, r.seq);
+  TEST_ASSERT_EQUAL(2, r.bay);
+  TEST_ASSERT_EQUAL(30, r.value);
+}
+
+void test_empty_and_missing_seq() {
+  Request r;
+  TEST_ASSERT_EQUAL(ParseResult::Empty, parseRequest("", r));
+  TEST_ASSERT_EQUAL(ParseResult::Empty, parseRequest("   ", r));
+  TEST_ASSERT_EQUAL(ParseResult::NoSeq, parseRequest("G 1 10", r));
+  TEST_ASSERT_EQUAL(ParseResult::NoSeq, parseRequest("70000 Q", r));
+  TEST_ASSERT_EQUAL(ParseResult::NoSeq, parseRequest("-1 Q", r));
+}
+
+void test_rejects_invalid_requests_but_keeps_seq() {
   const char* bad[] = {
-      R"({"id":"a","bay":0,"ml":10})",
-      R"({"id":"a","bay":13,"ml":10})",
-      R"({"id":"a","bay":1,"ml":0})",
-      R"({"id":"a","bay":1,"ml":401})",
-      R"({"id":"a","bay":1,"ml":"lots"})",
-      R"({"id":"a","bay":1,"ml":10,"g_per_ml":5})",
-      R"({"id":"a","ml":10})",
+      "5",            // no op
+      "5 X",          // unknown op
+      "5 GO 1 10",    // op is one letter
+      "5 G 1",        // missing position
+      "5 G 0 10",     // bay 0
+      "5 G 13 10",    // bay > 12
+      "5 G 1 100001", // too far
+      "5 G 1 1x",     // junk number
+      "5 G 1 10 9",   // extra argument
+      "5 H 1 2",      // hold is 0 or 1
+      "5 V 0",        // speed 0
+      "5 V 5001",     // too fast
+      "5 S now",      // stop takes nothing
   };
-  for (const char* json : bad) {
-    TEST_ASSERT_EQUAL_MESSAGE(ParseResult::Invalid, parse("cwjh/cmd/pour", json, cmd), json);
-    TEST_ASSERT_EQUAL_STRING("a", cmd.id);  // id kept so the error ack can be matched
+  for (const char* line : bad) {
+    Request r;
+    TEST_ASSERT_EQUAL_MESSAGE(ParseResult::Invalid, parseRequest(line, r), line);
+    TEST_ASSERT_EQUAL_MESSAGE(5, r.seq, line);
   }
 }
 
-void test_move_degrees_are_cut() {
-  Command cmd;
-  TEST_ASSERT_EQUAL(ParseResult::Ok, parse("cwjh/cmd/move", R"({"id":"m","bay":12,"degrees":90})", cmd));
-  TEST_ASSERT_FLOAT_WITHIN(0.001, 30.0, cmd.degrees);
-  TEST_ASSERT_EQUAL(ParseResult::Ok, parse("cwjh/cmd/move", R"({"id":"m","bay":12,"degrees":-4})", cmd));
-  TEST_ASSERT_FLOAT_WITHIN(0.001, 0.0, cmd.degrees);
+void test_formats_replies() {
+  char buf[64];
+  formatReady(buf, sizeof(buf), "0.2.0", 1);
+  TEST_ASSERT_EQUAL_STRING("READY 0.2.0 1", buf);
+  formatOk(buf, sizeof(buf), 3);
+  TEST_ASSERT_EQUAL_STRING("3 OK", buf);
+  formatOkValue(buf, sizeof(buf), 4, -267);
+  TEST_ASSERT_EQUAL_STRING("4 OK -267", buf);
+  formatErr(buf, sizeof(buf), 5, "no_motor");
+  TEST_ASSERT_EQUAL_STRING("5 ERR no_motor", buf);
+  const long pos[] = {267, 0, -12};
+  formatState(buf, sizeof(buf), 6, true, pos, 3);
+  TEST_ASSERT_EQUAL_STRING("6 STATE 1 267 0 -12", buf);
 }
 
-void test_rejects_missing_or_long_id() {
-  Command cmd;
-  TEST_ASSERT_EQUAL(ParseResult::Invalid, parse("cwjh/cmd/stop", R"({})", cmd));
-  TEST_ASSERT_EQUAL(ParseResult::Invalid, parse("cwjh/cmd/stop", R"({"id":""})", cmd));
-  TEST_ASSERT_EQUAL(ParseResult::Invalid,
-                    parse("cwjh/cmd/stop", R"({"id":"0123456789012345678901234567890123456789"})", cmd));
-  TEST_ASSERT_EQUAL(ParseResult::Invalid, parse("cwjh/cmd/stop", "not json", cmd));
+void test_state_is_truncated_safely() {
+  char buf[16];
+  const long pos[] = {100000, 100000, 100000};
+  formatState(buf, sizeof(buf), 1, false, pos, 3);
+  TEST_ASSERT_EQUAL('\0', buf[sizeof(buf) - 1]);
 }
 
-void test_unknown_topic() {
-  Command cmd;
-  TEST_ASSERT_EQUAL(ParseResult::UnknownTopic, parse("cwjh/cmd/dance", R"({"id":"x"})", cmd));
-}
-
-void test_format_ack() {
-  char buf[128];
-  formatAck(buf, sizeof buf, "a1", "error", "bay_empty", 12.34f);
-  TEST_ASSERT_EQUAL_STRING(R"({"id":"a1","status":"error","code":"bay_empty","poured_ml":12.3})", buf);
-  formatAck(buf, sizeof buf, "a1", "done", nullptr, -1.0f);
-  TEST_ASSERT_EQUAL_STRING(R"({"id":"a1","status":"done"})", buf);
-}
-
-void test_format_state() {
-  char buf[256];
-  HubState s;
-  s.glass = true;
-  s.lift = Lift::Up;
-  s.bays[2] = 30.0f;
-  formatState(buf, sizeof buf, s, "t");
-  TEST_ASSERT_NOT_NULL(strstr(buf, R"("lift":"up")"));
-  TEST_ASSERT_NOT_NULL(strstr(buf, R"("bays":[0,0,30,0,0,0,0,0,0,0,0,0])"));
-}
-
-static const PourConfig CFG{3.0f, 2.0f, 3000, 30.0f, 10000, 5.0f};
-
-void test_pour_stops_early_for_inflight() {
-  PourController pour(CFG);
-  pour.begin(50.0f, 100.0f, 0);
-  TEST_ASSERT_EQUAL(PourOutcome::Running, pour.update(120.0f, 1000));
-  TEST_ASSERT_EQUAL(PourOutcome::Running, pour.update(146.9f, 2000));
-  TEST_ASSERT_EQUAL(PourOutcome::Done, pour.update(147.0f, 2100));
-  TEST_ASSERT_FLOAT_WITHIN(0.01, 47.0, pour.pouredGrams());
-}
-
-void test_pour_detects_empty_bay() {
-  PourController pour(CFG);
-  pour.begin(50.0f, 0.0f, 0);
-  TEST_ASSERT_EQUAL(PourOutcome::Running, pour.update(10.0f, 500));
-  TEST_ASSERT_EQUAL(PourOutcome::Running, pour.update(11.0f, 3000));  // +1 g, not enough to reset
-  TEST_ASSERT_EQUAL(PourOutcome::BayEmpty, pour.update(11.5f, 3500));
-  TEST_ASSERT_FLOAT_WITHIN(0.01, 11.5, pour.pouredGrams());
-}
-
-void test_pour_detects_removed_glass() {
-  PourController pour(CFG);
-  pour.begin(50.0f, 20.0f, 0);
-  TEST_ASSERT_EQUAL(PourOutcome::NoGlass, pour.update(-250.0f, 100));
-}
-
-void test_pour_times_out() {
-  PourController pour(CFG);
-  pour.begin(50.0f, 0.0f, 0);  // timeout = 10 s + 50 / 5 s = 20 s
-  float g = 0.0f;
-  uint32_t t = 0;
-  for (; t < 19000; t += 1000) {
-    g += 2.0f;  // slow, but never stalls
-    TEST_ASSERT_EQUAL(PourOutcome::Running, pour.update(g, t));
-  }
-  TEST_ASSERT_EQUAL(PourOutcome::Timeout, pour.update(g + 2.0f, 20000));
-}
-
-void test_pour_survives_millis_wrap() {
-  PourController pour(CFG);
-  uint32_t start = 0xFFFFFF00u;
-  pour.begin(50.0f, 0.0f, start);
-  TEST_ASSERT_EQUAL(PourOutcome::Running, pour.update(5.0f, start + 1000));  // wrapped
-  TEST_ASSERT_EQUAL(PourOutcome::Done, pour.update(48.0f, start + 2000));
-}
-
-int main() {
+int main(int, char**) {
   UNITY_BEGIN();
-  RUN_TEST(test_parses_pour);
-  RUN_TEST(test_pour_density_defaults_to_water);
-  RUN_TEST(test_rejects_bad_pours);
-  RUN_TEST(test_move_degrees_are_cut);
-  RUN_TEST(test_rejects_missing_or_long_id);
-  RUN_TEST(test_unknown_topic);
-  RUN_TEST(test_format_ack);
-  RUN_TEST(test_format_state);
-  RUN_TEST(test_pour_stops_early_for_inflight);
-  RUN_TEST(test_pour_detects_empty_bay);
-  RUN_TEST(test_pour_detects_removed_glass);
-  RUN_TEST(test_pour_times_out);
-  RUN_TEST(test_pour_survives_millis_wrap);
+  RUN_TEST(test_parses_go);
+  RUN_TEST(test_parses_other_requests);
+  RUN_TEST(test_tolerates_extra_spaces);
+  RUN_TEST(test_empty_and_missing_seq);
+  RUN_TEST(test_rejects_invalid_requests_but_keeps_seq);
+  RUN_TEST(test_formats_replies);
+  RUN_TEST(test_state_is_truncated_safely);
   return UNITY_END();
 }

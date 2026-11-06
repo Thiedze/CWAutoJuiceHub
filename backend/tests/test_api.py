@@ -11,7 +11,7 @@ from cwjh.main import create_app
 
 @pytest.fixture
 def client():
-    app = create_app(Settings(mqtt_host="sim", db_url="sqlite://", ack_timeout_s=5))
+    app = create_app(Settings(serial_port="sim", db_url="sqlite://", ack_timeout_s=5, pour_flow_ml_s=2000))
     with TestClient(app) as client:
         client.app.state.sim.time_scale = 0.01
         yield client
@@ -95,12 +95,12 @@ def test_next_without_cocktail_is_conflict(client):
     assert client.post("/api/cocktail/start", json={"recipe_id": 9999}).status_code == 400
 
 
-def test_mqtt_log_shows_commands_and_acks(client):
+def test_serial_log_shows_moves_and_replies(client):
     wait(lambda: client.get("/api/status").json()["hub_online"])
     fill(client, 3, "Vodka")
-    log = client.get("/api/mqtt").json()
-    moves = [m for m in log if m["topic"] == "cwjh/cmd/move"]
-    assert [m["dir"] for m in moves] == ["out", "out"]
-    assert '"degrees":30.0' in moves[0]["payload"] and '"degrees":0.0' in moves[1]["payload"]
-    acks = [m for m in log if m["topic"] == "cwjh/hub/ack" and m["dir"] == "in"]
-    assert any('"status":"done"' in a["payload"] for a in acks)
+    log = client.get("/api/serial").json()
+    moves = [e["line"].split()[1:] for e in log if e["dir"] == "out" and e["line"].split()[1] == "G"]
+    assert moves == [["G", "3", "-267"], ["G", "3", "0"]]  # direction inverted by default
+    replies = [e["line"].split()[1:] for e in log if e["dir"] == "in"]
+    assert ["OK", "-267"] in replies and ["OK", "0"] in replies
+    assert log[0] == {**log[0], "dir": "in", "line": "READY sim 12"}

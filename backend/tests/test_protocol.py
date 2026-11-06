@@ -2,7 +2,6 @@ import pytest
 from pydantic import ValidationError
 
 from cwjh.protocol import Move, Pour
-from cwjh.transport import topic_matches
 
 
 @pytest.mark.parametrize(("degrees", "expected"), [(-5, 0), (0, 0), (12.5, 12.5), (30, 30), (45, 30)])
@@ -29,17 +28,3 @@ def test_pour_density_limits():
 
 def test_command_ids_are_unique():
     assert Pour(bay=1, ml=10).id != Pour(bay=1, ml=10).id
-
-
-@pytest.mark.parametrize(
-    ("pattern", "topic", "match"),
-    [
-        ("cwjh/cmd/#", "cwjh/cmd/glass/init", True),
-        ("cwjh/cmd/#", "cwjh/hub/ack", False),
-        ("cwjh/+/ack", "cwjh/hub/ack", True),
-        ("cwjh/hub/ack", "cwjh/hub/ack/x", False),
-        ("cwjh/hub/ack/x", "cwjh/hub/ack", False),
-    ],
-)
-def test_topic_matching(pattern, topic, match):
-    assert topic_matches(pattern, topic) is match

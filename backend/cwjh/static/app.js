@@ -211,88 +211,72 @@ async function fillBay(bay) {
   };
 }
 
-// MQTT panel: every message between the Pi and the hub
+// Serial panel: every line between the Pi and the Nano
 
-const mqtt = { count: 0, progressRow: null };
+const serial = { count: 0 };
 
-function mqttPrefs() {
-  try { return JSON.parse(localStorage.getItem("cwjh.mqtt") || "{}"); } catch { return {}; }
+function serialPrefs() {
+  try { return JSON.parse(localStorage.getItem("cwjh.serial") || "{}"); } catch { return {}; }
 }
-function saveMqttPrefs() {
+function saveSerialPrefs() {
   try {
-    localStorage.setItem("cwjh.mqtt", JSON.stringify({
-      open: !$("#mqtt-panel").classList.contains("collapsed"),
-      progress: $("#mqtt-progress").checked,
-      state: $("#mqtt-state").checked,
+    localStorage.setItem("cwjh.serial", JSON.stringify({
+      open: !$("#serial-panel").classList.contains("collapsed"),
+      status: $("#serial-status").checked,
     }));
   } catch {}
 }
-(function restoreMqttPrefs() {
-  const p = mqttPrefs();
-  if (new URLSearchParams(location.search).has("mqtt")) p.open = true;
-  if (p.open) { $("#mqtt-panel").classList.remove("collapsed"); document.body.classList.add("mqtt-open"); }
-  if (p.progress === false) $("#mqtt-progress").checked = false;
-  if (p.state) $("#mqtt-state").checked = true;
+(function restoreSerialPrefs() {
+  const p = serialPrefs();
+  if (new URLSearchParams(location.search).has("serial")) p.open = true;
+  if (p.open) { $("#serial-panel").classList.remove("collapsed"); document.body.classList.add("serial-open"); }
+  if (p.status) $("#serial-status").checked = true;
 })();
 
-$("#mqtt-toggle").addEventListener("click", () => {
-  const open = $("#mqtt-panel").classList.toggle("collapsed") === false;
-  document.body.classList.toggle("mqtt-open", open);
-  saveMqttPrefs();
+$("#serial-toggle").addEventListener("click", () => {
+  const open = $("#serial-panel").classList.toggle("collapsed") === false;
+  document.body.classList.toggle("serial-open", open);
+  saveSerialPrefs();
 });
-["#mqtt-progress", "#mqtt-state"].forEach((s) => $(s).addEventListener("change", () => { saveMqttPrefs(); applyMqttFilter(); }));
-$("#mqtt-clear").addEventListener("click", () => {
-  $("#mqtt-list").replaceChildren();
-  mqtt.count = 0;
-  mqtt.progressRow = null;
-  $("#mqtt-count").textContent = "0 messages";
+$("#serial-status").addEventListener("change", () => { saveSerialPrefs(); applySerialFilter(); });
+$("#serial-clear").addEventListener("click", () => {
+  $("#serial-list").replaceChildren();
+  serial.count = 0;
+  $("#serial-count").textContent = "0 lines";
 });
 
-function applyMqttFilter() {
-  const showProgress = $("#mqtt-progress").checked;
-  const showState = $("#mqtt-state").checked;
-  document.querySelectorAll("#mqtt-list li").forEach((li) => {
-    li.hidden = (li.dataset.kind === "progress" && !showProgress) || (li.dataset.kind === "state" && !showState);
+function applySerialFilter() {
+  const showStatus = $("#serial-status").checked;
+  document.querySelectorAll("#serial-list li").forEach((li) => {
+    li.hidden = li.dataset.kind === "status" && !showStatus;
   });
 }
 
-function mqttKind(topic) {
-  if (topic.endsWith("/progress")) return "progress";
-  if (topic.endsWith("/state")) return "state";
-  return "other";
+// "<seq> <op> ..." from the Pi, "<seq> OK|ERR|STATE ..." or "READY ..." from the Nano.
+function serialKind(line) {
+  const op = line.split(/\s+/)[1];
+  return op === "Q" || op === "STATE" ? "status" : "other";
 }
 
-function addMqtt(entry) {
-  const list = $("#mqtt-list");
-  const kind = mqttKind(entry.topic);
+function addSerial(entry) {
+  const list = $("#serial-list");
   const time = new Date(entry.t * 1000).toTimeString().slice(0, 8);
-  const short = entry.topic.replace(/^cwjh\//, "");
-  const isErr = entry.payload.includes('"status":"error"');
-  const isCmd = entry.dir === "out" && short.startsWith("cmd/") && short !== "cmd/state";
+  const op = entry.line.split(/\s+/)[1];
+  const isErr = op === "ERR" || entry.line.startsWith("FAIL");
+  const isCmd = entry.dir === "out" && ["G", "S", "V", "H"].includes(op);
 
-  // Fold a run of progress messages into one row that updates in place.
-  if (kind === "progress" && mqtt.progressRow && list.lastElementChild === mqtt.progressRow) {
-    const row = mqtt.progressRow;
-    row.querySelector(".time").textContent = time;
-    row.querySelector(".payload").textContent = `${entry.payload}  (x${++row.dataset.n})`;
-    return;
-  }
-
-  mqtt.count += 1;
-  $("#mqtt-count").textContent = `${mqtt.count} messages`;
+  serial.count += 1;
+  $("#serial-count").textContent = `${serial.count} lines`;
   const li = el("li", { className: `${entry.dir}${isErr ? " err" : ""}${isCmd ? " cmd" : ""}` },
     el("span", { className: "time", textContent: time }),
-    el("span", { className: "dir", textContent: entry.dir === "out" ? "Pi → hub" : "hub → Pi" }),
-    el("span", { className: "topic", textContent: short }),
-    el("span", { className: "payload", textContent: entry.payload })
+    el("span", { className: "dir", textContent: entry.dir === "out" ? "Pi → Nano" : "Nano → Pi" }),
+    el("span", { className: "line", textContent: entry.line })
   );
-  li.dataset.kind = kind;
-  if (kind === "progress") { li.dataset.n = 1; mqtt.progressRow = li; }
+  li.dataset.kind = serialKind(entry.line);
   list.append(li);
   while (list.children.length > 400) list.firstElementChild.remove();
-  applyMqttFilter();
-  const body = list;
-  if (body.scrollHeight - body.scrollTop - body.clientHeight < 80) body.scrollTop = body.scrollHeight;
+  applySerialFilter();
+  if (list.scrollHeight - list.scrollTop - list.clientHeight < 80) list.scrollTop = list.scrollHeight;
 }
 
 // Live updates
@@ -320,13 +304,12 @@ function connect() {
       showScale(data.scale_g);
     }
     if (type === "cocktail") renderCocktail(data);
-    if (type === "mqtt") addMqtt(data);
+    if (type === "serial") addSerial(data);
   };
   ws.onopen = async () => {
-    $("#mqtt-list").replaceChildren();
-    mqtt.count = 0;
-    mqtt.progressRow = null;
-    try { (await api("/mqtt")).forEach(addMqtt); } catch {}
+    $("#serial-list").replaceChildren();
+    serial.count = 0;
+    try { (await api("/serial")).forEach(addSerial); } catch {}
   };
   ws.onclose = () => {
     setOnline(false);

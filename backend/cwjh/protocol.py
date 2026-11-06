@@ -1,6 +1,9 @@
-"""MQTT topics and message models. See docs/protocol.md."""
+"""Commands the services give the hub, and what the hub reports back.
 
-from typing import ClassVar, Literal
+The hub (cwjh/hub.py) carries them out with the Nano; see docs/protocol.md for the wire format.
+"""
+
+from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
@@ -11,21 +14,7 @@ MAX_TILT_DEG = 30.0
 MIN_G_PER_ML = 0.5
 MAX_G_PER_ML = 2.0
 
-CMD_GLASS_INIT = "cwjh/cmd/glass/init"
-CMD_GLASS_RELEASE = "cwjh/cmd/glass/release"
-CMD_POUR = "cwjh/cmd/pour"
-CMD_MOVE = "cwjh/cmd/move"
-CMD_STOP = "cwjh/cmd/stop"
-CMD_STATE = "cwjh/cmd/state"
-CMD_ALL = "cwjh/cmd/#"
-
-HUB_ACK = "cwjh/hub/ack"
-HUB_PROGRESS = "cwjh/hub/progress"
-HUB_STATE = "cwjh/hub/state"
-HUB_ONLINE = "cwjh/hub/online"
-HUB_ALL = "cwjh/hub/#"
-
-ErrorCode = Literal["invalid", "busy", "no_glass", "bay_empty", "limit", "timeout", "stopped"]
+ErrorCode = Literal["invalid", "busy", "no_motor", "limit", "timeout", "stopped", "offline"]
 
 
 def new_id() -> str:
@@ -33,38 +22,28 @@ def new_id() -> str:
 
 
 class Command(BaseModel):
-    topic: ClassVar[str]
     id: str = Field(default_factory=new_id, min_length=1, max_length=36)
-
-    def payload(self) -> bytes:
-        return self.model_dump_json().encode()
 
 
 class GlassInit(Command):
-    topic: ClassVar[str] = CMD_GLASS_INIT
+    pass
 
 
 class GlassRelease(Command):
-    topic: ClassVar[str] = CMD_GLASS_RELEASE
+    pass
 
 
 class Stop(Command):
-    topic: ClassVar[str] = CMD_STOP
-
-
-class RequestState(Command):
-    topic: ClassVar[str] = CMD_STATE
+    pass
 
 
 class Pour(Command):
-    topic: ClassVar[str] = CMD_POUR
     bay: int = Field(ge=1, le=BAY_COUNT)
     ml: float = Field(gt=0, le=MAX_GLASS_ML)
     g_per_ml: float = Field(default=1.0, ge=MIN_G_PER_ML, le=MAX_G_PER_ML)
 
 
 class Move(Command):
-    topic: ClassVar[str] = CMD_MOVE
     bay: int = Field(ge=1, le=BAY_COUNT)
     degrees: float
 
@@ -75,14 +54,9 @@ class Move(Command):
         return min(max(value, 0.0), MAX_TILT_DEG)
 
 
-COMMANDS: dict[str, type[Command]] = {
-    cls.topic: cls for cls in (GlassInit, GlassRelease, Stop, RequestState, Pour, Move)
-}
-
-
 class Ack(BaseModel):
     id: str
-    status: Literal["accepted", "done", "error"]
+    status: Literal["done", "error"]
     code: ErrorCode | None = None
     poured_ml: float | None = None
 

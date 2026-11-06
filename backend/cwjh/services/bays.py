@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..models import Bay, Ingredient
-from ..mqtt_link import HubLink
+from ..hub import Hub
 from ..protocol import BAY_COUNT, MAX_TILT_DEG, Move
 
 
@@ -13,7 +13,7 @@ class BayError(Exception):
 
 
 class BayService:
-    def __init__(self, sessions: sessionmaker[Session], hub: HubLink):
+    def __init__(self, sessions: sessionmaker[Session], hub: Hub):
         self._sessions = sessions
         self._hub = hub
 

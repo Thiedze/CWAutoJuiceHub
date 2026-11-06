@@ -1,52 +1,23 @@
-// Pins, limits and calibration. See docs/hardware.md.
+// Pins and motion defaults. See docs/hardware.md.
 #pragma once
 
 #include <stdint.h>
 
-#define FW_VERSION "0.1.0"
+#define FW_VERSION "0.2.0"
 
-// Shared STEP and DIR for the 12 bay drivers; each is selected via its ENABLE.
-constexpr uint8_t PIN_BAY_STEP = 25;
-constexpr uint8_t PIN_BAY_DIR = 26;
+// SX1509 I/O expander, ADDR jumpers untouched.
+constexpr uint8_t SX1509_ADDR = 0x3E;
+// 100 kHz is safe on a breadboard. Every STEP pulse is two I2C writes, so this
+// caps the step rate at about 320 steps/s (400 kHz gives roughly 3x).
+constexpr uint32_t I2C_CLOCK = 100000;
 
-constexpr uint8_t PIN_LIFT_STEP = 32;
-constexpr uint8_t PIN_LIFT_DIR = 33;
-constexpr uint8_t PIN_LIFT_ENABLE = 27;
+// STEP and DIR are shared by all bay drivers (SX1509 I/O numbers).
+constexpr uint8_t SX_STEP = 1;
+constexpr uint8_t SX_DIR = 2;
 
-// 4x 74HC595: Q0..Q11 bay ENABLE (active low), Q16..Q27 bay LED (active high).
-constexpr uint8_t PIN_SR_DATA = 23;
-constexpr uint8_t PIN_SR_CLOCK = 18;
-constexpr uint8_t PIN_SR_LATCH = 5;
-constexpr uint8_t SR_LED_OFFSET = 16;
+// ENABLE pin (SX1509 I/O number, active low on the DRV8825) of bay 1, 2, ...
+// Add one entry per wired bay; the Nano reports the count in READY.
+constexpr uint8_t BAY_ENABLE[] = {3};
+constexpr uint8_t BAY_COUNT = sizeof(BAY_ENABLE) / sizeof(BAY_ENABLE[0]);
 
-constexpr uint8_t PIN_HX711_DOUT = 16;
-constexpr uint8_t PIN_HX711_SCK = 17;
-
-// Motion.
-constexpr float BAY_STEPS_PER_DEGREE = 8.889f;  // 200 steps * 16 microsteps / 360
-constexpr float BAY_MAX_SPEED = 1600.0f;        // steps/s
-constexpr float BAY_ACCEL = 4000.0f;            // steps/s^2
-// Pouring opens the dispenser by turning the bay motor this far from its rest
-// position (opposite direction to the bottle tilt). ASSUMPTION, see docs/hardware.md.
-constexpr long POUR_OPEN_STEPS = -400;
-
-constexpr long LIFT_UP_STEPS = 6400;
-constexpr float LIFT_MAX_SPEED = 2000.0f;
-constexpr float LIFT_ACCEL = 3000.0f;
-
-// Scale.
-constexpr float SCALE_FACTOR = 420.0f;    // raw counts per gram, calibrate!
-constexpr float GLASS_MIN_G = 50.0f;      // lighter than this is "no glass"
-constexpr uint32_t SCALE_SETTLE_MS = 800;  // wait after the lift stops before weighing
-
-// Pour.
-constexpr float INFLIGHT_OFFSET_G = 3.0f;  // still falls after the valve closes
-constexpr float STALL_G = 2.0f;            // must gain this much ...
-constexpr uint32_t STALL_MS = 3000;        // ... within this time, or the bay is empty
-constexpr float GLASS_LOST_G = 30.0f;      // weight drop that means the glass was removed
-constexpr uint32_t POUR_TIMEOUT_BASE_MS = 10000;
-constexpr float POUR_MIN_FLOW_G_S = 5.0f;
-
-// Reporting.
-constexpr uint32_t PROGRESS_INTERVAL_MS = 200;
-constexpr uint32_t STATE_INTERVAL_MS = 2000;
+constexpr uint16_t DEFAULT_STEPS_PER_S = 300;

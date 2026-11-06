@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from ..config import Settings
 from ..models import Bay, IngredientType, Recipe, RecipeIngredient
-from ..mqtt_link import HubError, HubLink
+from ..hub import Hub, HubError
 from ..protocol import MAX_GLASS_ML, GlassInit, GlassRelease, Pour
 
 log = logging.getLogger(__name__)
@@ -109,7 +109,7 @@ Listener = Callable[[dict[str, Any]], None]
 
 
 class CocktailService:
-    def __init__(self, sessions: sessionmaker[Session], hub: HubLink, settings: Settings):
+    def __init__(self, sessions: sessionmaker[Session], hub: Hub, settings: Settings):
         self._sessions = sessions
         self._hub = hub
         self._settings = settings

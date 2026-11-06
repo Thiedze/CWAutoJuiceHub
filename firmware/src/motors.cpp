@@ -1,85 +1,87 @@
 #include "motors.h"
 
 #include <Arduino.h>
+#include <Wire.h>  // before SparkFunSX1509.h, which uses TwoWire
+#include <SparkFunSX1509.h>
 
-#include "config.h"
-
-using cwjh::BAY_COUNT;
+namespace cwjh {
 
 namespace {
-constexpr uint32_t ALL_BAYS_DISABLED = (1u << BAY_COUNT) - 1;  // ENABLE is active low
+SX1509 io;
 }
 
-void Motors::begin() {
-  pinMode(PIN_SR_DATA, OUTPUT);
-  pinMode(PIN_SR_CLOCK, OUTPUT);
-  pinMode(PIN_SR_LATCH, OUTPUT);
-  outputs_ = ALL_BAYS_DISABLED;
-  writeShiftRegister();
+bool Motors::begin() {
+  Wire.begin();
+  if (!io.begin(SX1509_ADDR)) return false;
+  Wire.setClock(I2C_CLOCK);
 
-  bay_ = AccelStepper(AccelStepper::DRIVER, PIN_BAY_STEP, PIN_BAY_DIR);
-  bay_.setMaxSpeed(BAY_MAX_SPEED);
-  bay_.setAcceleration(BAY_ACCEL);
-
-  lift_ = AccelStepper(AccelStepper::DRIVER, PIN_LIFT_STEP, PIN_LIFT_DIR);
-  lift_.setEnablePin(PIN_LIFT_ENABLE);
-  lift_.setPinsInverted(false, false, true);
-  lift_.setMaxSpeed(LIFT_MAX_SPEED);
-  lift_.setAcceleration(LIFT_ACCEL);
-  lift_.enableOutputs();
-}
-
-void Motors::run() {
-  bay_.run();
-  lift_.run();
-  if (active_bay_) bay_pos_[active_bay_ - 1] = bay_.currentPosition();
-}
-
-void Motors::stopAll() {
-  // Hard stop: no deceleration ramp, drivers released at once.
-  bay_.setCurrentPosition(bay_.currentPosition());
-  lift_.setCurrentPosition(lift_.currentPosition());
-  if (active_bay_) bay_pos_[active_bay_ - 1] = bay_.currentPosition();
-  outputs_ |= ALL_BAYS_DISABLED;
-  active_bay_ = 0;
-  writeShiftRegister();
-}
-
-int Motors::otherDisplacedBay(int bay) const {
-  for (int i = 1; i <= BAY_COUNT; ++i) {
-    if (i != bay && bay_pos_[i - 1] != 0) return i;
+  // Drivers off first so no motor jumps.
+  for (uint8_t i = 0; i < BAY_COUNT; i++) {
+    io.pinMode(BAY_ENABLE[i], OUTPUT);
+    setEnabled(i, false);
   }
-  return 0;
+  io.pinMode(SX_STEP, OUTPUT);
+  io.pinMode(SX_DIR, OUTPUT);
+  io.digitalWrite(SX_STEP, LOW);
+  return true;
 }
 
-void Motors::moveBay(int bay, long target_steps) {
-  selectBay(bay);
-  bay_.moveTo(target_steps);
+void Motors::setEnabled(uint8_t index, bool on) {
+  io.digitalWrite(BAY_ENABLE[index], on ? LOW : HIGH);
+  enabled_[index] = on;
 }
 
-void Motors::moveLift(long target_steps) { lift_.moveTo(target_steps); }
-
-void Motors::setLed(int bay, bool on) {
-  uint32_t bit = 1u << (SR_LED_OFFSET + bay - 1);
-  outputs_ = on ? (outputs_ | bit) : (outputs_ & ~bit);
-  writeShiftRegister();
+void Motors::setHold(uint8_t bay, bool on) {
+  const uint8_t index = bay - 1;
+  hold_[index] = on;
+  setEnabled(index, needsTorque(index));
 }
 
-void Motors::selectBay(int bay) {
-  if (bay == active_bay_) return;
-  // Only the selected driver is enabled. A disabled bay may not hold its position, so
-  // the caller makes sure no other bay is displaced before selecting a new one.
-  outputs_ |= ALL_BAYS_DISABLED;
-  outputs_ &= ~(1u << (bay - 1));
-  writeShiftRegister();
-  active_bay_ = bay;
-  bay_.setCurrentPosition(bay_pos_[bay - 1]);
-}
-
-void Motors::writeShiftRegister() {
-  digitalWrite(PIN_SR_LATCH, LOW);
-  for (int byte = 3; byte >= 0; --byte) {
-    shiftOut(PIN_SR_DATA, PIN_SR_CLOCK, MSBFIRST, (outputs_ >> (byte * 8)) & 0xFF);
+void Motors::disableAll() {
+  for (uint8_t i = 0; i < BAY_COUNT; i++) {
+    hold_[i] = false;
+    setEnabled(i, false);
   }
-  digitalWrite(PIN_SR_LATCH, HIGH);
 }
+
+MoveResult Motors::moveTo(uint8_t bay, long target, bool (*shouldStop)()) {
+  const uint8_t index = bay - 1;
+
+  for (uint8_t i = 0; i < BAY_COUNT; i++) {
+    if (i == index || !enabled_[i]) continue;
+    if (needsTorque(i)) return MoveResult::Busy;
+    setEnabled(i, false);
+  }
+
+  const bool forward = target >= pos_[index];
+  io.digitalWrite(SX_DIR, forward ? HIGH : LOW);
+  if (!enabled_[index]) {
+    setEnabled(index, true);
+    delay(2);  // DRV8825 wake-up after ENABLE
+  }
+
+  const uint32_t period = 1000000UL / speed_;
+  uint32_t next = micros();
+  MoveResult result = MoveResult::Done;
+
+  while (pos_[index] != target) {
+    if (shouldStop()) {
+      result = MoveResult::Stopped;
+      break;
+    }
+    io.digitalWrite(SX_STEP, HIGH);
+    io.digitalWrite(SX_STEP, LOW);
+    pos_[index] += forward ? 1 : -1;
+
+    next += period;
+    while ((int32_t)(micros() - next) < 0) {
+    }
+    // I2C may be slower than the requested rate; don't try to catch up.
+    if ((int32_t)(micros() - next) > (int32_t)period) next = micros();
+  }
+
+  if (result == MoveResult::Done) setEnabled(index, needsTorque(index));
+  return result;
+}
+
+}  // namespace cwjh

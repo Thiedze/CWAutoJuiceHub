@@ -1,18 +1,18 @@
 import asyncio
+from dataclasses import replace
 
 import pytest
 
 from cwjh.config import Settings
 from cwjh.db import init_db, make_engine
-from cwjh.mqtt_link import HubLink
-from cwjh.protocol import HUB_ONLINE
+from cwjh.hub import Hub
+from cwjh.nano_link import NanoLink
 from cwjh.seed import seed
 from cwjh.services.bays import BayService
 from cwjh.services.cocktail import CocktailService
-from cwjh.sim.hub_sim import HubSim
-from cwjh.transport import LocalBroker
+from cwjh.sim.nano_sim import NanoSim
 
-# Simulated seconds run 100x faster in tests.
+# Simulated motor time runs 100x faster in tests.
 TIME_SCALE = 0.01
 
 
@@ -27,25 +27,27 @@ def sessions():
 
 
 class Rig:
-    def __init__(self, sessions):
-        self.broker = LocalBroker()
-        self.sim_transport = self.broker.client(will=(HUB_ONLINE, b"0"))
-        self.sim = HubSim(self.sim_transport, flow_ml_s=20.0, time_scale=TIME_SCALE)
-        self.settings = Settings(ack_timeout_s=2.0, min_flow_ml_s=50.0)
-        self.hub = HubLink(self.broker.client(), default_timeout_s=self.settings.ack_timeout_s)
+    def __init__(self, sessions, bays: int = 12):
+        self.nano = NanoSim(bays=bays, time_scale=TIME_SCALE)
+        # Timed pours at 2 l/s, so a 150 ml step takes 75 ms.
+        self.settings = Settings(ack_timeout_s=2.0, pour_flow_ml_s=2000.0, invert_direction=False)
+        self.link = NanoLink(self.nano.line(), ready_timeout_s=0.3, ping_s=0.1, ping_timeout_s=0.3, retry_s=0.05)
+        self.hub = Hub(self.link, self.settings)
         self.sessions = sessions
         self.bays = BayService(sessions, self.hub)
         self.cocktail = CocktailService(sessions, self.hub, self.settings)
         self.events: list[dict] = []
         self.cocktail.add_listener(self.events.append)
 
+    def configure(self, **changes):
+        """Change hub settings on the fly, e.g. a slower pour."""
+        self.hub._settings = replace(self.hub._settings, **changes)
+
     async def start(self):
         await self.hub.start()
-        self.sim.start()
         await wait_for(lambda: self.hub.online)
 
     def stop(self):
-        self.sim.stop()
         self.hub.stop()
 
 

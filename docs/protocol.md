@@ -1,122 +1,79 @@
-# MQTT protocol
+# Serial protocol
 
-This is the contract between the Raspberry Pi (backend) and the ESP32 (hub). Both sides
-must follow it exactly. It refines the "protocol" page of the wiki.
+This is the contract between the Raspberry Pi (backend) and the Arduino Nano (motor
+controller). The Nano only moves motors; every decision (angles, pour times, limits) is
+made by the backend in `backend/cwjh/hub.py`.
 
 ## Transport
 
-- MQTT 3.1.1, broker runs on the Pi (Mosquitto, port 1883).
-- All topics start with `cwjh/`.
-- All payloads are UTF-8 JSON objects, except `cwjh/hub/online`.
-- QoS 1 for commands and acks, QoS 0 for progress.
+- USB serial, 115200 baud, 8N1.
+- ASCII lines ending in `\n` (the Nano sends `\r\n`; the backend strips it).
+- Opening the port resets the Nano (DTR). It boots in about 1.6 s and then sends `READY`.
+  After a reset every position is 0, so the backend reads the positions again.
 
-## Commands (Pi to hub)
+## Requests (Pi to Nano)
 
-Every command carries an `id` (string, max 36 chars, chosen by the Pi, unique per command).
-The hub answers each command on `cwjh/hub/ack` using the same `id`.
+Every request starts with a sequence number `<n>` (1..65535) chosen by the Pi. The reply
+carries the same number. `0` is reserved for the probe described below.
 
-| Topic | Payload | Effect |
+| Request | Reply | Meaning |
 |---|---|---|
-| `cwjh/cmd/glass/init` | `{"id"}` | Raise the lift, tare the scale, check that a glass is present. |
-| `cwjh/cmd/glass/release` | `{"id"}` | Lower the lift so the glass can be taken. |
-| `cwjh/cmd/pour` | `{"id", "bay", "ml", "g_per_ml"}` | Pour from `bay` (1..12) until the scale has gained `ml * g_per_ml` grams. |
-| `cwjh/cmd/move` | `{"id", "bay", "degrees"}` | Tilt `bay` to an absolute angle for bottle insertion. |
-| `cwjh/cmd/stop` | `{"id"}` | Emergency stop: disable every motor at once. |
-| `cwjh/cmd/state` | `{"id"}` | Publish a fresh `cwjh/hub/state`. |
+| `<n> G <bay> <pos>` | `<n> OK <pos>` | Move bay (1..12) to an absolute position in steps (-100000..100000). The reply comes when the move is done. |
+| `<n> S` | `<n> OK` | Stop: disable every driver at once. |
+| `<n> Q` | `<n> STATE <busy> <pos1> ... <posN>` | Busy flag (0/1) and the position of each wired bay. |
+| `<n> V <steps/s>` | `<n> OK` | Step rate, 1..5000. Through the SX1509 the Nano manages about 320. |
+| `<n> H <bay> <0/1>` | `<n> OK` | Hold: keep the bay's driver on (torque) even at rest. |
 
-### Limits
-
-- `degrees` is clamped to `0..30`. Values outside are cut, not rejected (as the wiki says).
-- `ml` must be `> 0`. The total poured since the last `glass/init` must not exceed 400 ml.
-  A pour that would exceed it is rejected with code `limit`. The Pi enforces the same limit
-  before sending.
-- `g_per_ml` must be in `0.5..2.0` (density of the liquid).
-
-### Concurrency
-
-The hub runs one command at a time. While it is busy, any new command except `stop` and
-`state` is rejected with code `busy`.
-
-The hub must clear its busy flag **before** it publishes the final `done` or `error` ack. The
-Pi sends the next command as soon as it sees the ack, and would otherwise get `busy`.
-
-## Hub to Pi
-
-### `cwjh/hub/ack`
-
-```json
-{"id": "abc", "status": "accepted"}
-{"id": "abc", "status": "done", "poured_ml": 39.6}
-{"id": "abc", "status": "error", "code": "bay_empty", "poured_ml": 12.0}
-```
-
-- `accepted` is sent right away for commands that take time (`glass/init`, `glass/release`,
-  `pour`, `move`). Instant commands (`stop`, `state`) only get `done`.
-- `done` ends a command. `pour` adds `poured_ml`.
-- `error` ends a command. `pour` adds `poured_ml` when something was poured.
-
-Error codes:
+Any request can also be answered with `<n> ERR <code>`:
 
 | Code | Meaning |
 |---|---|
-| `invalid` | Payload could not be parsed, or a field is missing or out of range. |
-| `busy` | Another command is still running. |
-| `no_glass` | No glass on the scale (on `glass/init`, or the glass was removed while pouring). |
-| `bay_empty` | The scale stopped gaining weight while pouring. |
-| `limit` | The pour would exceed the 400 ml glass limit. |
-| `timeout` | The command did not finish within its time limit. |
-| `stopped` | The command was cancelled by `stop`. |
+| `invalid` | Unknown request or a value out of range. |
+| `busy` | A move is running. Also when another bay must keep its torque, because the bays share one STEP line. |
+| `no_motor` | The bay has no motor wired (see `BAY_ENABLE` in `firmware/src/config.h`). |
+| `stopped` | The move was cancelled by `S`. |
 
-### `cwjh/hub/progress`
+A line without a usable sequence number gets no reply.
 
-Sent about 5 times per second while pouring.
+### While a move runs
 
-```json
-{"id": "abc", "grams": 21.4, "target": 40.0}
-```
+The Nano reads serial between steps:
 
-### `cwjh/hub/state` (retained)
+- `Q` is answered right away (`busy` is 1).
+- `S` stops the move. The move answers `<n> ERR stopped`, then the stop answers `<m> OK`.
+- Everything else is answered with `ERR busy`.
 
-Published on every change and in reply to `cwjh/cmd/state`.
+### Torque
 
-```json
-{
-  "busy": false,
-  "scale_g": 0.0,
-  "glass": true,
-  "lift": "up",
-  "poured_ml": 120.0,
-  "bays": [0, 0, 30, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  "fw": "0.1.0"
-}
-```
+A bay's driver is on while it moves, while it is away from position 0 (so a tilted bottle
+stays put), and while hold is on. `S` turns every driver off and clears hold; the positions
+are kept, but a loaded bay may slip.
 
-- `lift` is `"up"`, `"down"` or `"moving"`.
-- `poured_ml` is the total poured since the last `glass/init`.
-- `bays` holds the current tilt angle of bay 1..12.
+## Nano to Pi without a request
 
-### `cwjh/hub/online` (retained)
+| Line | When |
+|---|---|
+| `READY <fw> <bays>` | After boot. `bays` is the number of wired bays. |
+| `FAIL sx1509` | Every second if the SX1509 does not answer on I2C. |
 
-`"1"` after the hub connects. `"0"` is set as the MQTT last will, so the broker publishes it
-when the hub drops off the network.
+If no `READY` arrives within 4 s after the port opened (a Nano that did not reset), the
+backend sends `0 Q` and takes the number of positions in the reply as the bay count.
 
-## Flows
+## Liveness
 
-### Initialise a bay (fill with a bottle)
+The backend sends `Q` every 5 s. If the Nano does not answer within 3 s, or the USB port
+goes away, the backend reports the hub offline, fails the running command with `offline`,
+and reopens the port every second until the Nano is back.
 
-1. User picks a bay and a liquid in the UI.
-2. Pi sends `move {bay, degrees: 30}`, waits for `done`.
-3. User inserts the bottle and confirms in the UI.
-4. Pi sends `move {bay, degrees: 0}`, waits for `done`, and stores the bay contents.
+## How the backend uses it
 
-### Make a cocktail
+| Backend command | Nano requests |
+|---|---|
+| Tilt a bay for filling (`Move`, 0..30 degrees) | `G <bay> <degrees x steps_per_degree>`, sign flipped when `invert_direction` is on |
+| Pour (timed, until there is a scale) | `G <bay> <pour_open_steps>`, wait `ml / pour_flow_ml_s`, `G <bay> 0` |
+| Abort or emergency stop | `S`; a pour then closes its dispenser with `G <bay> 0` |
+| Timeout | `S` |
+| Glass placed / taken | nothing yet (no lift); the backend only resets its poured total |
 
-1. User picks a cocktail. The UI asks for a glass.
-2. Pi sends `glass/init`, waits for `done`.
-3. For each liquid step in order: Pi sends `pour`, waits for `done`, then subtracts
-   `poured_ml` from the bay volume.
-4. Solid steps (fruit, ice and so on) are manual: the UI shows them and waits for "next".
-5. Pi sends `glass/release`. The drink is ready.
-
-On any `error` the Pi stops the flow and shows the error. On a timeout waiting for an ack
-the Pi sends `stop`.
+The backend refuses a pour that would bring the glass over 400 ml (`limit`) before it moves
+anything.

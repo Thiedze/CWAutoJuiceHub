@@ -1,18 +1,20 @@
-"""End to end: services -> HubLink -> broker -> simulated hub, and back."""
+"""End to end: services -> Hub -> NanoLink -> simulated Nano, and back."""
 
-import math
+import asyncio
 
 import pytest
 from sqlalchemy import select
 
+from cwjh.hub import HubError
 from cwjh.models import Bay, Ingredient, Recipe
-from cwjh.mqtt_link import HubError
-from cwjh.protocol import Move, Pour
+from cwjh.protocol import GlassInit, Move, Pour
 from cwjh.services.cocktail import CocktailError, Phase
 
-from .conftest import wait_for
+from .conftest import Rig, wait_for
 
 pytestmark = pytest.mark.asyncio
+
+TILT_STEPS = round(30 * 8.889)  # MAX_TILT_DEG at the default steps per degree
 
 
 def ingredient_id(rig, name):
@@ -32,13 +34,19 @@ def bay_volume(rig, bay_id):
 
 async def fill(rig, bay_id, name, volume=700.0):
     await rig.bays.start_fill(bay_id)
-    assert rig.sim.state.bays[bay_id - 1] == 30
+    assert rig.nano.positions[bay_id - 1] == TILT_STEPS
+    assert rig.hub.state.bays[bay_id - 1] == 30
     await rig.bays.confirm_fill(bay_id, ingredient_id(rig, name), volume)
-    assert rig.sim.state.bays[bay_id - 1] == 0
+    assert rig.nano.positions[bay_id - 1] == 0
 
 
 def phase(rig):
     return rig.cocktail.status.phase
+
+
+def sent(rig, op):
+    """Lines the Nano received with this op letter."""
+    return [line for line in rig.nano.received if line.split()[1:2] == [op]]
 
 
 async def test_fill_and_empty_bay(rig):
@@ -50,9 +58,28 @@ async def test_fill_and_empty_bay(rig):
     assert not rig.bays.list()[3].filled
 
 
-async def test_move_is_clamped_by_the_hub_too(rig):
+async def test_move_turns_degrees_into_steps(rig):
+    await rig.hub.send(Move(bay=2, degrees=12.5))
+    assert rig.nano.positions[1] == round(12.5 * 8.889)
+    await rig.hub.send(Move(bay=2, degrees=45))  # cut to 30
+    assert rig.nano.positions[1] == TILT_STEPS
+
+
+async def test_inverted_direction_flips_every_move(rig):
+    rig.configure(invert_direction=True)
     await rig.hub.send(Move(bay=1, degrees=30))
-    assert rig.sim.state.bays[0] == 30
+    assert rig.nano.positions[0] == -TILT_STEPS
+    assert rig.hub.state.bays[0] == 30
+    await rig.hub.send(GlassInit())
+    await rig.hub.send(Move(bay=1, degrees=0))
+    await rig.hub.send(Pour(bay=1, ml=10), timeout_s=5)
+    assert [line.split()[2:] for line in sent(rig, "G")][-2:] == [["1", "400"], ["1", "0"]]
+
+
+async def test_sync_sets_speed_and_state(rig):
+    assert sent(rig, "V") and sent(rig, "V")[0].endswith(" V 300")
+    assert rig.hub.state.fw == "sim"
+    assert rig.hub.state.bays == [0.0] * 12
 
 
 async def test_full_cocktail(rig):
@@ -73,44 +100,17 @@ async def test_full_cocktail(rig):
     assert steps[2].poured_ml == pytest.approx(150, abs=0.2)
     assert bay_volume(rig, 1) == pytest.approx(650, abs=0.2)
     assert bay_volume(rig, 2) == pytest.approx(550, abs=0.2)
-    assert rig.sim.state.lift == "down"
+    assert rig.nano.positions[:2] == [0, 0], "dispensers must be closed again"
     assert any(e["progress"] for e in rig.events), "UI never got pour progress"
+    # Each pour opens the dispenser and closes it again.
+    assert [line.split()[2:] for line in sent(rig, "G")][-4:] == [["1", "-400"], ["1", "0"], ["2", "-400"], ["2", "0"]]
 
     rig.cocktail.next()  # drink taken
     assert phase(rig) is Phase.IDLE
 
 
-async def test_empty_bottle_stops_with_bay_empty(rig):
-    await fill(rig, 1, "Orange Juice")
-    await fill(rig, 2, "Grenadine")
-    rig.sim.bay_liquid_ml[1] = 40.0  # bottle has much less than the UI thinks
-
-    rig.cocktail.start(recipe_id(rig, "Virgin Sunrise"))
-    rig.cocktail.next()
-    await wait_for(lambda: phase(rig) is Phase.AWAIT_MANUAL)
-    rig.cocktail.next()
-
-    await wait_for(lambda: phase(rig) is Phase.ERROR, timeout=5)
-    assert rig.cocktail.status.error == "hub: bay_empty"
-    juice = rig.cocktail.status.plan.steps[1]
-    assert juice.status == "error"
-    assert juice.poured_ml == pytest.approx(40, abs=0.2)
-    assert bay_volume(rig, 1) == pytest.approx(660, abs=0.2)
-
-
-async def test_no_glass(rig):
-    await fill(rig, 1, "Orange Juice")
-    await fill(rig, 2, "Grenadine")
-    rig.sim.glass_present = False
-
-    rig.cocktail.start(recipe_id(rig, "Virgin Sunrise"))
-    rig.cocktail.next()
-    await wait_for(lambda: phase(rig) is Phase.ERROR)
-    assert rig.cocktail.status.error == "hub: no_glass"
-
-
-async def test_abort_while_pouring_stops_hub(rig):
-    rig.sim.flow_ml_s = 1.0  # slow, so the pour is still running when we abort
+async def test_abort_while_pouring_stops_and_closes(rig):
+    rig.configure(pour_flow_ml_s=1.0)  # slow, so the pour is still running when we abort
     await fill(rig, 1, "Orange Juice")
     await fill(rig, 2, "Grenadine")
 
@@ -118,56 +118,102 @@ async def test_abort_while_pouring_stops_hub(rig):
     rig.cocktail.next()
     await wait_for(lambda: phase(rig) is Phase.AWAIT_MANUAL)
     rig.cocktail.next()
-    await wait_for(lambda: phase(rig) is Phase.POURING and rig.sim.state.busy)
+    await wait_for(lambda: phase(rig) is Phase.POURING and rig.nano.positions[0] == -400)
 
     await rig.cocktail.abort()
     assert phase(rig) is Phase.IDLE
-    await wait_for(lambda: not rig.sim.state.busy)
+    assert sent(rig, "S"), "the Nano never got a stop"
+    await wait_for(lambda: not rig.hub.state.busy)
+    assert rig.nano.positions[0] == 0, "the dispenser was left open"
 
 
-async def test_hub_rejects_second_command_while_busy(rig):
-    rig.sim.flow_ml_s = 1.0
-    await rig.hub.send(rig_glass_init())
-    import asyncio
-
-    pour = asyncio.create_task(rig.hub.send(Pour(bay=1, ml=100), timeout_s=5))
-    await wait_for(lambda: rig.sim.state.busy)
-    # Bypass the link's own lock to see the hub's answer.
-    with pytest.raises(HubError, match="busy"):
-        await rig.hub._send(Move(bay=2, degrees=10), 1.0)
+async def test_stop_during_a_move(rig):
+    rig.nano.time_scale = 1.0  # 267 steps take almost a second
+    move = asyncio.create_task(rig.hub.send(Move(bay=1, degrees=30)))
+    await wait_for(lambda: rig.nano.positions[0] > 20)
     await rig.hub.emergency_stop()
     with pytest.raises(HubError, match="stopped"):
-        await pour
+        await move
+    assert 0 < rig.nano.positions[0] < TILT_STEPS
 
 
-def rig_glass_init():
-    from cwjh.protocol import GlassInit
-
-    return GlassInit()
+async def test_nano_rejects_a_second_move_while_moving(rig):
+    rig.nano.time_scale = 1.0
+    first = asyncio.create_task(rig.link.request("G 1 300", 5))
+    await wait_for(lambda: rig.nano.busy)
+    # Bypass the hub's own lock to see the Nano's answer.
+    with pytest.raises(Exception, match="busy"):
+        await rig.link.request("G 2 10", 1)
+    state = await rig.link.request("Q", 1)  # queries still work while moving
+    assert state[:2] == ["STATE", "1"]
+    await rig.link.request("S", 1)
+    with pytest.raises(Exception, match="stopped"):
+        await first
 
 
 async def test_hub_enforces_glass_limit(rig):
-    rig.sim.bay_liquid_ml[1] = math.inf
-    await rig.hub.send(rig_glass_init())
+    await rig.hub.send(GlassInit())
     await rig.hub.send(Pour(bay=1, ml=390), timeout_s=5)
     with pytest.raises(HubError, match="limit"):
         await rig.hub.send(Pour(bay=1, ml=20))
 
 
-async def test_hub_going_offline(rig):
+async def test_glass_init_resets_the_poured_total(rig):
+    await rig.hub.send(GlassInit())
+    await rig.hub.send(Pour(bay=1, ml=300), timeout_s=5)
+    await rig.hub.send(GlassInit())
+    await rig.hub.send(Pour(bay=1, ml=300), timeout_s=5)
+    assert rig.hub.state.poured_ml == pytest.approx(300, abs=0.2)
+
+
+async def test_bay_without_motor(sessions):
+    rig = Rig(sessions, bays=1)
+    await rig.start()
+    try:
+        await rig.hub.send(Move(bay=1, degrees=10))
+        with pytest.raises(HubError, match="no_motor"):
+            await rig.hub.send(Move(bay=2, degrees=10))
+        with pytest.raises(HubError, match="no_motor"):
+            await rig.bays.start_fill(2)
+    finally:
+        rig.stop()
+
+
+async def test_unplug_and_reconnect(rig):
     await fill(rig, 1, "Vodka")
-    rig.sim_transport.drop()
+    rig.nano.unplug()
     await wait_for(lambda: not rig.hub.online)
     with pytest.raises(HubError, match="offline"):
         await rig.bays.start_fill(2)
 
+    rig.nano.plug()
+    await wait_for(lambda: rig.hub.online)
+    await rig.bays.start_fill(2)
+    assert rig.nano.positions[1] == TILT_STEPS
 
-async def test_ack_timeout_sends_stop(rig):
-    rig.sim.time_scale = 1.0
-    rig.hub._default_timeout_s = 0.1
+
+async def test_unplug_while_pouring_reports_offline(rig):
+    rig.configure(pour_flow_ml_s=1.0)
+    await rig.hub.send(GlassInit())
+    pour = asyncio.create_task(rig.hub.send(Pour(bay=1, ml=100), timeout_s=10))
+    await wait_for(lambda: rig.nano.positions[0] == -400)
+    rig.nano.unplug()
+    with pytest.raises(HubError, match="offline"):
+        await pour
+
+
+async def test_silent_nano_goes_offline(rig):
+    rig.nano.mute = True  # USB still there, firmware hung
+    await wait_for(lambda: not rig.hub.online)
+
+
+async def test_timeout_sends_stop(rig):
+    rig.nano.time_scale = 1.0
+    rig.configure(ack_timeout_s=0.1)
     with pytest.raises(HubError, match="timeout"):
-        await rig.hub.send(rig_glass_init())
-    await wait_for(lambda: not rig.sim.state.busy)
+        await rig.hub.send(Move(bay=1, degrees=30))
+    assert sent(rig, "S")
+    await wait_for(lambda: not rig.nano.busy)
 
 
 async def test_cannot_start_unavailable_recipe(rig):

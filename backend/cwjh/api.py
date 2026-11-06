@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from .models import Bay, Ingredient
-from .mqtt_link import HubError
+from .hub import HubError
 from .services.bays import BayError
 from .services.cocktail import MAX_STRENGTH, MIN_STRENGTH, CocktailError, Plan
 
@@ -69,10 +69,10 @@ def status(request: Request) -> dict[str, Any]:
     }
 
 
-@router.get("/mqtt")
-def mqtt_messages(request: Request) -> list[dict[str, Any]]:
-    """The last MQTT messages between the Pi and the hub, oldest first."""
-    return list(_services(request).mqtt_log.entries)
+@router.get("/serial")
+def serial_lines(request: Request) -> list[dict[str, Any]]:
+    """The last lines between the Pi and the Nano, oldest first."""
+    return list(_services(request).serial_log.entries)
 
 
 @router.get("/ingredients")
