@@ -85,10 +85,22 @@ def test_profile_follows_the_bottle_weight(client):
 
 
 def test_test_move_goes_out_and_back(client):
-    r = client.post("/api/debug/bays/4/test", json={"steps": 60, "repeat": 2})
+    r = client.post("/api/debug/bays/4/test", json={"to": "steps", "steps": 60, "dwell_s": 0, "repeat": 2})
     assert r.json() == {"position": 0}
     gs = [line.split()[2:] for line in sim(client).received if line.split()[1] == "G"]
     assert gs == [["4", "60"], ["4", "0"], ["4", "60"], ["4", "0"]]
+
+
+def test_test_goes_to_the_pour_position_and_waits(client):
+    import time
+
+    client.put("/api/debug/bays/2/config", json=config(client, 2, pour_open_steps=-150))
+    started = time.monotonic()
+    r = client.post("/api/debug/bays/2/test", json={"dwell_s": 0.3})
+    assert r.json() == {"position": 0}
+    assert time.monotonic() - started >= 0.3
+    gs = [line.split()[2:] for line in sim(client).received if line.split()[1] == "G"]
+    assert gs == [["2", "-150"], ["2", "0"]]
 
 
 def test_home_without_switch_and_zero_and_hold(client):
@@ -147,3 +159,10 @@ def test_moves_and_requests_ask_the_page_for_a_snapshot(client):
     client.post("/api/debug/camera/request?label=check 45")
     cameras = [d for k, d in events if k == "camera"]
     assert cameras == [{"label": "bay1-at20", "reason": "move"}, {"label": "check45", "reason": "request"}]
+
+
+def test_fill_uses_the_bays_fill_tilt(client):
+    client.put("/api/debug/bays/3/config", json=config(client, 3, fill_degrees=20, steps_per_degree=3.1))
+    assert client.post("/api/bays/3/fill/start").status_code == 200
+    assert sim(client).positions[2] == 62  # 20 degrees x 3.1
+    assert client.put("/api/debug/bays/3/config", json=config(client, 3, fill_degrees=31)).status_code == 422

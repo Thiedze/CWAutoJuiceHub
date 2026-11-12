@@ -35,7 +35,7 @@ class Settings:
     home_search_steps: int = 600
     home_release_steps: int = 200
     # A pour turns the bay this far from rest (opposite to the bottle tilt). Calibrate!
-    pour_open_steps: int = -400
+    pour_open_steps: int = 400
     # Until there is a scale, a pour is timed with this flow. Calibrate!
     pour_flow_ml_s: float = 10.0
     # Slowest expected flow; a pour of x ml gets 10 s + x / min_flow seconds (or the

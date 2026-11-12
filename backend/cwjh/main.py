@@ -60,7 +60,7 @@ def create_app(settings: Settings | None = None, line: Line | None = None) -> Fa
         app.state.sessions = sessions
         app.state.hub = hub
         app.state.motors = motors
-        app.state.bays = BayService(sessions, hub)
+        app.state.bays = BayService(sessions, hub, motors)
         app.state.cocktail = cocktail
         app.state.broadcaster = broadcaster
         app.state.serial_log = serial_log

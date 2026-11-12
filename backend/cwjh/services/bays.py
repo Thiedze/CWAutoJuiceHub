@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..models import Bay, Ingredient
 from ..hub import Hub
 from ..protocol import BAY_COUNT, MAX_TILT_DEG, Move
+from .motors import Motors
 
 
 class BayError(Exception):
@@ -13,9 +14,10 @@ class BayError(Exception):
 
 
 class BayService:
-    def __init__(self, sessions: sessionmaker[Session], hub: Hub):
+    def __init__(self, sessions: sessionmaker[Session], hub: Hub, motors: Motors | None = None):
         self._sessions = sessions
         self._hub = hub
+        self._motors = motors
 
     def list(self) -> list[Bay]:
         with self._sessions() as session:
@@ -27,7 +29,8 @@ class BayService:
     async def start_fill(self, bay_id: int) -> None:
         """Tilt the bay so a bottle can be inserted."""
         _check_id(bay_id)
-        await self._hub.send(Move(bay=bay_id, degrees=MAX_TILT_DEG))
+        degrees = self._motors.config(bay_id).fill_degrees if self._motors else MAX_TILT_DEG
+        await self._hub.send(Move(bay=bay_id, degrees=degrees))
 
     async def confirm_fill(self, bay_id: int, ingredient_id: int, volume_ml: float) -> Bay:
         """Bottle is in: tilt back and remember what the bay holds."""

@@ -26,7 +26,7 @@
     </section>
 
     <section class="panel">
-      <h3>Move <span class="muted small">+ tilts the bottle, &minus; pours; the bay moves when you let go of the slider</span></h3>
+      <h3>Move <span class="muted small">+ tilts the bottle (filling, further on pouring); the bay moves when you let go of the slider</span></h3>
       <div id="move-sliders"></div>
       <div class="jog">
         <button data-jog="-100">&minus;100</button>
@@ -38,6 +38,7 @@
       </div>
       <div class="row wrap">
         <button id="rest">Rest (0)</button>
+        <button id="fill">Fill tilt</button>
         <button id="home">Home on switch</button>
         <button id="zero">Set 0 here</button>
         <button id="hold">Hold: off</button>
@@ -47,8 +48,11 @@
     <section class="panel">
       <h3>Test</h3>
       <label class="inline"><input id="use-bottle" type="checkbox" checked> <span>Use the bottle's weight (<span id="bottle-g">0</span> g)</span></label>
+      <label class="inline">Go to
+        <select id="test-to"><option value="pour">the pour position</option><option value="steps">a number of steps</option></select>
+      </label>
       <div id="test-sliders"></div>
-      <button id="test" class="primary">Run test: out and back</button>
+      <button id="test" class="primary">Run test: out, wait, back</button>
     </section>
 
     <section class="panel">

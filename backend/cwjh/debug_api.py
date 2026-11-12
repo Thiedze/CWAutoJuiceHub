@@ -2,7 +2,7 @@
 
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
@@ -36,7 +36,11 @@ class MoveRequest(BaseModel):
 
 
 class TestRequest(BaseModel):
-    steps: int = Field(ge=1, le=MAX_STEPS)
+    """Out to the bay's pour position (or by steps), wait there, back to rest; repeat times."""
+
+    to: Literal["pour", "steps"] = "pour"
+    steps: int = Field(default=200, ge=1, le=MAX_STEPS)
+    dwell_s: float = Field(default=5.0, ge=0, le=60)
     repeat: int = Field(default=1, ge=1, le=20)
     load_g: float | None = Field(default=None, ge=0, le=10000)
 
@@ -143,15 +147,22 @@ async def move(request: Request, bay: int, body: MoveRequest) -> dict[str, Any]:
 
 @router.post("/bays/{bay}/test")
 async def test(request: Request, bay: int, body: TestRequest) -> dict[str, Any]:
-    """Out by steps and back, repeat times."""
     _check_bay(bay)
     _require_idle(request)
-    hub = _state(request).hub
+    s = _state(request)
     position = None
     for _ in range(body.repeat):
-        await _call(hub.move_by(bay, body.steps, body.load_g))
-        position = await _call(hub.move_by(bay, -body.steps, body.load_g))
-    _ask_snapshot(request, f"bay{bay}-test")
+        if body.to == "pour":
+            far = await _call(s.hub.move_to(bay, s.motors.config(bay).pour_open_steps, body.load_g))
+        else:
+            far = await _call(s.hub.move_by(bay, body.steps, body.load_g))
+        _ask_snapshot(request, f"bay{bay}-test-at{far}")
+        await _call(s.hub.dwell(body.dwell_s))
+        if body.to == "pour":
+            position = await _call(s.hub.move_to(bay, 0, body.load_g))
+        else:
+            position = await _call(s.hub.move_by(bay, -body.steps, body.load_g))
+    _ask_snapshot(request, f"bay{bay}-test-back")
     return {"position": position}
 
 

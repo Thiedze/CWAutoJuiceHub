@@ -73,7 +73,7 @@ async def test_inverted_direction_flips_every_move(rig):
     await rig.hub.send(GlassInit())
     await rig.hub.send(Move(bay=1, degrees=0))
     await rig.hub.send(Pour(bay=1, ml=10), timeout_s=5)
-    assert [line.split()[2:] for line in sent(rig, "G")][-2:] == [["1", "400"], ["1", "0"]]
+    assert [line.split()[2:] for line in sent(rig, "G")][-2:] == [["1", "-400"], ["1", "0"]]
 
 
 async def test_sync_reads_state(rig):
@@ -112,7 +112,7 @@ async def test_full_cocktail(rig):
     assert rig.nano.positions[:2] == [0, 0], "dispensers must be closed again"
     assert any(e["progress"] for e in rig.events), "UI never got pour progress"
     # Each pour opens the dispenser and closes it again.
-    assert [line.split()[2:] for line in sent(rig, "G")][-4:] == [["1", "-400"], ["1", "0"], ["2", "-400"], ["2", "0"]]
+    assert [line.split()[2:] for line in sent(rig, "G")][-4:] == [["1", "400"], ["1", "0"], ["2", "400"], ["2", "0"]]
 
     rig.cocktail.next()  # drink taken
     assert phase(rig) is Phase.IDLE
@@ -127,7 +127,7 @@ async def test_abort_while_pouring_stops_and_closes(rig):
     rig.cocktail.next()
     await wait_for(lambda: phase(rig) is Phase.AWAIT_MANUAL)
     rig.cocktail.next()
-    await wait_for(lambda: phase(rig) is Phase.POURING and rig.nano.positions[0] == -400)
+    await wait_for(lambda: phase(rig) is Phase.POURING and rig.nano.positions[0] == 400)
 
     await rig.cocktail.abort()
     assert phase(rig) is Phase.IDLE
@@ -205,7 +205,7 @@ async def test_unplug_while_pouring_reports_offline(rig):
     rig.configure(pour_flow_ml_s=1.0)
     await rig.hub.send(GlassInit())
     pour = asyncio.create_task(rig.hub.send(Pour(bay=1, ml=100), timeout_s=10))
-    await wait_for(lambda: rig.nano.positions[0] == -400)
+    await wait_for(lambda: rig.nano.positions[0] == 400)
     rig.nano.unplug()
     with pytest.raises(HubError, match="offline"):
         await pour
@@ -245,3 +245,11 @@ async def test_park_moves_every_bay_back_to_rest(rig):
     await rig.hub.move_to(5, -100)
     await rig.hub.park()
     assert rig.nano.positions[1] == 0 and rig.nano.positions[4] == 0
+
+
+async def test_stop_ends_a_dwell(rig):
+    wait = asyncio.create_task(rig.hub.dwell(5))
+    await asyncio.sleep(0.05)
+    await rig.hub.emergency_stop()
+    with pytest.raises(HubError, match="stopped"):
+        await wait

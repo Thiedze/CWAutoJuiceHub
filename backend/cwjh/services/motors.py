@@ -9,6 +9,7 @@ density until the load cell exists.
 
 import json
 from dataclasses import dataclass
+from typing import Protocol
 
 import logging
 
@@ -17,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import Settings
 from ..models import Bay, BayMotor
+from ..protocol import MAX_TILT_DEG
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +30,10 @@ class MotorConfig(BaseModel):
     # Flip the motor's direction so that positive steps tilt the bottle for filling.
     invert: bool
     steps_per_degree: float = Field(gt=0, le=1000)
-    # How far a pour turns the bay from rest (opposite to the tilt), and the timed flow.
+    # How far the bay tilts so a bottle can be inserted (fill flow), at most MAX_TILT_DEG.
+    fill_degrees: float = Field(default=MAX_TILT_DEG, ge=1, le=MAX_TILT_DEG)
+    # How far a pour turns the bay from rest (same side as the filling tilt, further), and
+    # the timed flow.
     pour_open_steps: int = Field(ge=-100000, le=100000)
     pour_flow_ml_s: float = Field(gt=0, le=10000)
     # After homing, go this far onto the home switch and call that 0, so the switch is
@@ -95,6 +100,12 @@ def profile_for(config: MotorConfig, load_g: float) -> Profile:
         start_ms=blend(config.start_ms_empty, config.start_ms_full),
         end_ms=blend(config.end_ms_empty, config.end_ms_full),
     )
+
+
+class Motors(Protocol):
+    def config(self, bay: int) -> "MotorConfig": ...
+
+    def profile(self, bay: int, load_g: float | None = None) -> "Profile": ...
 
 
 class DefaultMotors:

@@ -100,13 +100,13 @@ Notes from the bring-up:
 These are backend settings (environment variables, see the README):
 
 - **`CWJH_INVERT_DIRECTION`**: if filling a bay tilts it the wrong way, flip this (`1` or `0`).
-  It flips every move, so the pour stays opposite to the tilt. The default `1` matches the
+  It flips every move, tilt and pour alike. The default `1` matches the
   bay motor on the bench. Swapping the wires of one motor coil has the same effect.
 - **`CWJH_STEPS_PER_DEGREE`**: motor steps per degree of bay tilt. The default 8.889 assumes
   1/16 microsteps (200 steps x 16 / 360). Command a 30 degree tilt (fill a bay in the UI),
   measure the real angle, and scale the value.
-- **`CWJH_POUR_OPEN_STEPS`**: how far the bay turns from rest to pour, opposite to the tilt
-  direction. The default -400 is an assumption; check the direction and the angle on the
+- **`CWJH_POUR_OPEN_STEPS`**: how far the bay turns from rest to pour, on the same side as the
+  filling tilt, past horizontal. The default 400 is an assumption; check the angle on the
   machine.
 - **`CWJH_POUR_FLOW_ML_S`**: until there is a scale, a pour is timed. Pour for a known time
   into a measuring cup and divide the volume by the time.

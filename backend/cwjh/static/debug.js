@@ -58,10 +58,12 @@ const MOVE_SLIDERS = [["target", "Position", -60, 60, 0.5, "°", 1, 0]];
 const TEST_SLIDERS = [
   ["weight", "Test weight", 0, 1000, 10, "g", 0, 0],
   ["test_steps", "Steps out and back", 10, 3000, 10, "", 0, 200],
+  ["test_dwell", "Wait at the far end", 0, 30, 0.5, "s", 1, 5],
   ["test_repeat", "Repeat", 1, 10, 1, "×", 0, 1],
 ];
 const CONFIG_SLIDERS = [
   ["steps_per_degree", "Steps per degree", 0.5, 60, "any", "", 3],
+  ["fill_degrees", "Fill tilt", 1, 30, 0.5, "°", 1],
   ["pour_open_steps", "Pour position", -3000, 3000, 10, "steps", 0],
   ["pour_flow_ml_s", "Pour flow", 0.5, 50, 0.5, "ml/s", 1],
   ["min_speed", "Start speed", 1, 500, 1, "steps/s", 0],
@@ -195,6 +197,7 @@ document.querySelectorAll("[data-jog]").forEach((button) =>
   button.addEventListener("click", () => move({ steps: Number(button.dataset.jog) }))
 );
 $("#rest").addEventListener("click", () => move({ position: 0 }));
+$("#fill").addEventListener("click", () => move({ degrees: Number(slider("fill_degrees").value) }));
 
 $("#home").addEventListener("click", async () => {
   const r = await act("Home", () => api(`/debug/bays/${ui.selected}/home`, { method: "POST" }));
@@ -214,11 +217,26 @@ $("#hold").addEventListener("click", async () => {
   }
 });
 
+function testBody(withLoad = true) {
+  return {
+    to: $("#test-to").value,
+    steps: Number(slider("test_steps").value),
+    dwell_s: Number(slider("test_dwell").value),
+    repeat: Number(slider("test_repeat").value),
+    load_g: withLoad ? testLoad() : null,
+  };
+}
+
+function syncTestTo() {
+  slider("test_steps").closest(".slider").hidden = $("#test-to").value === "pour";
+  drawChart();
+}
+$("#test-to").addEventListener("change", syncTestTo);
+
 $("#test").addEventListener("click", async () => {
-  await act("Test", () => api(`/debug/bays/${ui.selected}/test`, {
-    method: "POST",
-    body: { steps: Number(slider("test_steps").value), repeat: Number(slider("test_repeat").value), load_g: testLoad() },
-  }));
+  $("#all-status").textContent = `Testing bay ${ui.selected} ...`;
+  await act("Test", () => api(`/debug/bays/${ui.selected}/test`, { method: "POST", body: testBody() }));
+  $("#all-status").textContent = "";
   ui.positionSet = false;
 });
 
@@ -226,11 +244,11 @@ $("#test-all").addEventListener("click", async () => {
   const wired = (ui.data?.bays || []).filter((b) => b.wired);
   if (!wired.length) return toast("No wired bays");
   ui.testingAll = true;
-  const steps = Number(slider("test_steps").value);
+  const body = testBody(false);  // each bay with its own bottle weight
   for (const b of wired) {
     if (!ui.testingAll) break;
-    $("#all-status").textContent = `Testing bay ${b.bay} (${steps} steps out and back) ...`;
-    const r = await act(`Bay ${b.bay}`, () => api(`/debug/bays/${b.bay}/test`, { method: "POST", body: { steps } }));
+    $("#all-status").textContent = `Testing bay ${b.bay} ...`;
+    const r = await act(`Bay ${b.bay}`, () => api(`/debug/bays/${b.bay}/test`, { method: "POST", body }));
     if (!r) ui.testingAll = false;
   }
   $("#all-status").textContent = ui.testingAll ? `Tested ${wired.length} wired bay(s).` : "Stopped.";
@@ -351,7 +369,8 @@ function drawChart() {
   if (!b) return;
   const config = readConfig();
   if (NUMBER_FIELDS.some((n) => !Number.isFinite(config[n])) || config.full_load_g <= 0 || config.min_speed < 1) return;
-  const steps = Math.max(1, Math.round(Number(slider("test_steps").value) || 1));
+  const toPour = $("#test-to").value === "pour";
+  const steps = Math.max(1, Math.round(Math.abs(toPour ? config.pour_open_steps : Number(slider("test_steps").value)) || 1));
   const load = $("#use-bottle").checked ? b.load_g : Number(slider("weight").value);
   const curves = [
     { cls: "empty", label: "empty", points: simulate(profileFor(config, 0), steps) },
@@ -518,5 +537,6 @@ function connect() {
 
 connect();
 syncWeight();
+syncTestTo();
 refresh();
 setInterval(() => { if (!document.hidden) refresh(); }, 1000);

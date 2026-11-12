@@ -2,17 +2,18 @@
 
 Until a scale is fitted, a pour is timed: open the dispenser, wait ml / flow, close it.
 Every move runs with the bay's motion profile (services/motors.py), blended by the weight
-of its bottle. Positions here are machine steps: positive tilts the bottle, negative pours.
+of its bottle. Positions here are machine steps from rest: positive tilts the bottle, toward filling and
+further to pouring.
 """
 
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any, Protocol, TypeVar
+from typing import Any, TypeVar
 
 from .config import Settings
 from .nano_link import NanoError, NanoLink
-from .services.motors import DefaultMotors, MotorConfig, Profile
+from .services.motors import DefaultMotors, Motors, Profile
 from .protocol import (
     BAY_COUNT,
     MAX_GLASS_ML,
@@ -41,12 +42,6 @@ class HubError(Exception):
         super().__init__(code)
         self.code = code
         self.poured_ml = poured_ml
-
-
-class Motors(Protocol):
-    def config(self, bay: int) -> MotorConfig: ...
-
-    def profile(self, bay: int, load_g: float | None = None) -> Profile: ...
 
 
 class Hub:
@@ -389,6 +384,15 @@ class Hub:
             return ok
 
         return await self._exclusive(action, 300)
+
+    async def dwell(self, seconds: float) -> None:
+        """Wait between test moves; an emergency stop ends it with HubError("stopped")."""
+        self._stop.clear()
+        try:
+            await asyncio.wait_for(self._stop.wait(), seconds)
+        except TimeoutError:
+            return
+        raise HubError("stopped")
 
     async def zero(self, bay: int) -> None:
         async def action() -> None:

@@ -70,6 +70,6 @@ Environment variables for the backend:
 | `CWJH_INVERT_DIRECTION` | `1` | flip every motor move; `1` matches the bench wiring, `0` if the bay tilts the wrong way |
 | `CWJH_HOME_STEP_RATE` | `100` | steps per second while homing |
 | `CWJH_HOME_SEARCH_STEPS` | `600` | how far homing searches for the switch on each side |
-| `CWJH_POUR_OPEN_STEPS` | `-400` | how far a pour turns the bay from rest |
+| `CWJH_POUR_OPEN_STEPS` | `400` | how far a pour turns the bay from rest, past the filling tilt |
 | `CWJH_POUR_FLOW_ML_S` | `10` | flow of the timed pour, in ml/s |
 | `CWJH_MIN_FLOW_ML_S` | `5` | slowest expected pour in ml/s; sets the pour timeout |
