@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Motor debug</title>
+  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="debug.css">
+</head>
+<body class="debug">
+  <header>
+    <a href="/" class="icon back" aria-label="Back to the app">&#8592;</a>
+    <h1>Motor debug</h1>
+    <span id="hub-badge" class="badge offline">hub offline</span>
+    <button id="stop" class="stop">STOP</button>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="row wrap">
+        <label class="inline grow">Bay <select id="bay-select"></select></label>
+        <button id="test-all">Test all wired bays</button>
+      </div>
+      <p id="live" class="live"></p>
+      <p id="all-status" class="muted small"></p>
+    </section>
+
+    <section class="panel">
+      <h3>Move <span class="muted small">+ tilts the bottle, &minus; pours; the bay moves when you let go of the slider</span></h3>
+      <div id="move-sliders"></div>
+      <div class="jog">
+        <button data-jog="-100">&minus;100</button>
+        <button data-jog="-10">&minus;10</button>
+        <button data-jog="-1">&minus;1</button>
+        <button data-jog="1">+1</button>
+        <button data-jog="10">+10</button>
+        <button data-jog="100">+100</button>
+      </div>
+      <div class="row wrap">
+        <button id="rest">Rest (0)</button>
+        <button id="home">Home on switch</button>
+        <button id="zero">Set 0 here</button>
+        <button id="hold">Hold: off</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>Test</h3>
+      <label class="inline"><input id="use-bottle" type="checkbox" checked> <span>Use the bottle's weight (<span id="bottle-g">0</span> g)</span></label>
+      <div id="test-sliders"></div>
+      <button id="test" class="primary">Run test: out and back</button>
+    </section>
+
+    <section class="panel">
+      <h3>Calibration <span class="muted small">saved per bay, used for every fill and pour</span></h3>
+      <form id="config">
+        <label class="inline"><input name="invert" type="checkbox"> Inverted direction</label>
+        <div id="config-sliders"></div>
+        <h4>Motion <span class="muted small">empty bottle / full bottle</span></h4>
+        <div id="curve-sliders" class="pairs"></div>
+        <div class="row">
+          <button type="submit" class="primary">Save</button>
+          <button type="button" id="config-reset">Undo changes</button>
+          <span id="config-status" class="muted"></span>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h3>Camera <span class="muted small">e.g. the iPhone via Continuity Camera; snapshots stay on this machine</span></h3>
+      <div class="row wrap">
+        <label class="inline grow">Camera <select id="camera-select"><option value="">start the camera first</option></select></label>
+        <button id="camera-toggle">Start camera</button>
+        <button id="camera-snap" disabled>Send snapshot</button>
+      </div>
+      <label class="inline"><input id="camera-auto" type="checkbox" checked> <span>Send a snapshot after every move</span></label>
+      <video id="camera" playsinline muted hidden></video>
+      <p id="camera-status" class="muted small"></p>
+    </section>
+
+    <section class="panel">
+      <h3>Speed curve <span class="muted small">for the test move, with the slider values</span></h3>
+      <svg id="chart" viewBox="0 0 640 260" role="img" aria-label="Speed over time"></svg>
+      <p id="chart-legend" class="legend"></p>
+    </section>
+
+    <section class="panel">
+      <h3>Raw request <span class="muted small">without the sequence number, e.g. Q, W, G 1 50, P 1 300 50 200 200</span></h3>
+      <form id="raw" class="row">
+        <input id="raw-line" type="text" autocomplete="off" spellcheck="false" placeholder="Q">
+        <button type="submit">Send</button>
+      </form>
+      <ol id="raw-out" class="console"></ol>
+    </section>
+
+    <section class="panel">
+      <h3>Serial <span class="muted small">pings (Q, W) hidden</span></h3>
+      <ol id="serial" class="console"></ol>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="debug.js"></script>
+</body>
+</html>

@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .api import Broadcaster, router
+from .debug_api import router as debug_router
 from .config import Settings
 from .db import init_db, make_engine
 from .hub import Hub
@@ -21,6 +22,7 @@ from .seed import seed
 from .serial_log import SerialLog
 from .services.bays import BayService
 from .services.cocktail import CocktailService
+from .services.motors import MotorService
 from .sim.nano_sim import NanoSim
 
 log = logging.getLogger(__name__)
@@ -48,7 +50,8 @@ def create_app(settings: Settings | None = None, line: Line | None = None) -> Fa
 
         broadcaster = Broadcaster()
         serial_log = SerialLog(asyncio.get_running_loop(), lambda entry: broadcaster.publish("serial", entry))
-        hub = Hub(NanoLink(line, tap=serial_log.record), settings)
+        motors = MotorService(sessions, settings)
+        hub = Hub(NanoLink(line, tap=serial_log.record), settings, motors)
         cocktail = CocktailService(sessions, hub, settings)
         hub.add_listener(broadcaster.publish)
         cocktail.add_listener(lambda status: broadcaster.publish("cocktail", status))
@@ -56,6 +59,7 @@ def create_app(settings: Settings | None = None, line: Line | None = None) -> Fa
         app.state.settings = settings
         app.state.sessions = sessions
         app.state.hub = hub
+        app.state.motors = motors
         app.state.bays = BayService(sessions, hub)
         app.state.cocktail = cocktail
         app.state.broadcaster = broadcaster
@@ -69,11 +73,13 @@ def create_app(settings: Settings | None = None, line: Line | None = None) -> Fa
             yield
         finally:
             await cocktail.abort()
+            await hub.park()
             hub.stop()
             engine.dispose()
 
     app = FastAPI(title="CWAutoJuiceHub", lifespan=lifespan)
     app.include_router(router)
+    app.include_router(debug_router)
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
     return app
 

@@ -76,10 +76,19 @@ async def test_inverted_direction_flips_every_move(rig):
     assert [line.split()[2:] for line in sent(rig, "G")][-2:] == [["1", "400"], ["1", "0"]]
 
 
-async def test_sync_sets_speed_and_state(rig):
-    assert sent(rig, "V") and sent(rig, "V")[0].endswith(" V 300")
+async def test_sync_reads_state(rig):
     assert rig.hub.state.fw == "sim"
     assert rig.hub.state.bays == [0.0] * 12
+    assert not sent(rig, "P"), "no profile is sent before the first move"
+
+
+async def test_profile_is_sent_once_before_moves(rig):
+    await rig.hub.send(Move(bay=3, degrees=10))
+    await rig.hub.send(Move(bay=3, degrees=0))
+    # Defaults (step rate 300): empty bottle, so the "empty" values.
+    assert [line.split()[1:] for line in sent(rig, "P")] == [["P", "3", "300", "50", "200", "200"]]
+    lines = [line.split()[1] for line in rig.nano.received if line.split()[1] in ("P", "G")]
+    assert lines == ["P", "G", "G"]
 
 
 async def test_full_cocktail(rig):
@@ -229,3 +238,10 @@ async def test_recipe_availability_listing(rig):
     assert not by_name["Virgin Sunrise"]["alcoholic"]
     assert not by_name["Screwdriver"]["available"]
     assert by_name["Screwdriver"]["alcoholic"]
+
+
+async def test_park_moves_every_bay_back_to_rest(rig):
+    await rig.hub.send(Move(bay=2, degrees=20))
+    await rig.hub.move_to(5, -100)
+    await rig.hub.park()
+    assert rig.nano.positions[1] == 0 and rig.nano.positions[4] == 0

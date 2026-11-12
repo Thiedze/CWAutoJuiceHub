@@ -11,9 +11,9 @@ log = logging.getLogger("cwjh.serial")
 
 
 def is_status(line: str) -> bool:
-    """Q requests and STATE replies: mostly the liveness pings."""
+    """Q and W requests and their STATE and SW replies: liveness pings and the debug page."""
     words = line.split()
-    return len(words) >= 2 and words[1] in ("Q", "STATE")
+    return len(words) >= 2 and words[1] in ("Q", "STATE", "W", "SW")
 
 
 class SerialLog:

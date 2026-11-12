@@ -14,7 +14,7 @@ MAX_TILT_DEG = 30.0
 MIN_G_PER_ML = 0.5
 MAX_G_PER_ML = 2.0
 
-ErrorCode = Literal["invalid", "busy", "no_motor", "limit", "timeout", "stopped", "offline"]
+ErrorCode = Literal["invalid", "busy", "no_motor", "limit", "timeout", "stopped", "offline", "home_failed"]
 
 
 def new_id() -> str:
@@ -74,4 +74,6 @@ class HubState(BaseModel):
     lift: Literal["up", "down", "moving"] = "down"
     poured_ml: float = 0.0
     bays: list[float] = Field(default_factory=lambda: [0.0] * BAY_COUNT)
+    # Per bay: True homed on its switch, False switch not found, None no home switch.
+    homed: list[bool | None] = Field(default_factory=lambda: [None] * BAY_COUNT)
     fw: str = ""

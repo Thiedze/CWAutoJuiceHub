@@ -19,6 +19,9 @@ carries the same number. `0` is reserved for the probe described below.
 | Request | Reply | Meaning |
 |---|---|---|
 | `<n> G <bay> <pos>` | `<n> OK <pos>` | Move bay (1..12) to an absolute position in steps (-100000..100000). The reply comes when the move is done. |
+| `<n> F <bay> <pos> <level>` | `<n> OK <pos> <found>` | Find: like `G`, but stop as soon as the bay's home switch reads `level` (1 pressed, 0 released). The switch is checked before every step, also before the first. `found` is 1 when the move ended at the switch, 0 when it reached `pos`. |
+| `<n> Z <bay>` | `<n> OK` | Zero: the current position of bay becomes 0. |
+| `<n> W` | `<n> SW <s1> ... <sN>` | Home switch of each wired bay: `1` pressed, `0` released, `-` no switch. |
 | `<n> S` | `<n> OK` | Stop: disable every driver at once. |
 | `<n> Q` | `<n> STATE <busy> <pos1> ... <posN>` | Busy flag (0/1) and the position of each wired bay. |
 | `<n> V <steps/s>` | `<n> OK` | Step rate, 1..5000. Through the SX1509 the Nano manages about 320. |
@@ -31,6 +34,7 @@ Any request can also be answered with `<n> ERR <code>`:
 | `invalid` | Unknown request or a value out of range. |
 | `busy` | A move is running. Also when another bay must keep its torque, because the bays share one STEP line. |
 | `no_motor` | The bay has no motor wired (see `BAY_ENABLE` in `firmware/src/config.h`). |
+| `no_switch` | `F` for a bay without a home switch (see `BAY_HOME`). |
 | `stopped` | The move was cancelled by `S`. |
 
 A line without a usable sequence number gets no reply.
@@ -39,7 +43,7 @@ A line without a usable sequence number gets no reply.
 
 The Nano reads serial between steps:
 
-- `Q` is answered right away (`busy` is 1).
+- `Q` and `W` are answered right away (`busy` is 1).
 - `S` stops the move. The move answers `<n> ERR stopped`, then the stop answers `<m> OK`.
 - Everything else is answered with `ERR busy`.
 
@@ -64,6 +68,23 @@ backend sends `0 Q` and takes the number of positions in the reply as the bay co
 The backend sends `Q` every 5 s. If the Nano does not answer within 3 s, or the USB port
 goes away, the backend reports the hub offline, fails the running command with `offline`,
 and reopens the port every second until the Nano is back.
+
+## Homing
+
+Each bay can have a home switch that is pressed when the bay is at rest. After every
+(re)connect the backend homes each bay that `W` reports a switch for, before it reports the
+hub online:
+
+1. Slow down to `home_step_rate` (`V`).
+2. If the switch is released, search in growing steps to both sides with `F ... 1`:
+   ±50, ±100, ±200, ±400 steps, up to `home_search_steps` (600) from where the bay stood.
+   If it is not found, the bay goes back to where it was and is reported as not homed.
+3. On the switch: leave it toward the tilt side with `F ... 0`, then come back with `F ... 1`.
+   The position where it presses again is the edge seen from the tilt side; `Z` makes it 0.
+4. Restore the step rate (`V`).
+
+The result is in the hub state (`homed`: true, false, or null for no switch). A bay without
+a switch keeps the position it had when the Nano booted.
 
 ## How the backend uses it
 

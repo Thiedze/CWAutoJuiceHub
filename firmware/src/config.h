@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define FW_VERSION "0.2.0"
+#define FW_VERSION "0.4.0"
 
 // SX1509 I/O expander, ADDR jumpers untouched.
 constexpr uint8_t SX1509_ADDR = 0x3E;
@@ -20,4 +20,12 @@ constexpr uint8_t SX_DIR = 2;
 constexpr uint8_t BAY_ENABLE[] = {3};
 constexpr uint8_t BAY_COUNT = sizeof(BAY_ENABLE) / sizeof(BAY_ENABLE[0]);
 
+// Home switch of bay 1, 2, ... (SX1509 I/O number), pressed when the bay is at rest.
+// Input with the SX1509's internal pull-up; the switch closes to GND (pressed = low).
+// NO_SWITCH for a bay without one.
+constexpr uint8_t NO_SWITCH = 0xFF;
+constexpr uint8_t BAY_HOME[] = {4};
+static_assert(sizeof(BAY_HOME) == BAY_COUNT, "one BAY_HOME entry per bay");
+
+// Motion profile until the Pi sends one (P request): constant 300 steps/s, no curves.
 constexpr uint16_t DEFAULT_STEPS_PER_S = 300;

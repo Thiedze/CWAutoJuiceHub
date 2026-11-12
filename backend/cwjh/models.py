@@ -71,3 +71,13 @@ class Bay(Base):
     @property
     def filled(self) -> bool:
         return self.ingredient_id is not None
+
+
+class BayMotor(Base):
+    """Calibration of a bay's motor (services/motors.py), stored as JSON so new fields need
+    no migration: missing fields fall back to the defaults."""
+
+    __tablename__ = "bay_motor"
+
+    bay_id: Mapped[int] = mapped_column(ForeignKey("bay.id"), primary_key=True)
+    config_json: Mapped[str] = mapped_column(Text)

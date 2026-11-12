@@ -255,7 +255,7 @@ function applySerialFilter() {
 // "<seq> <op> ..." from the Pi, "<seq> OK|ERR|STATE ..." or "READY ..." from the Nano.
 function serialKind(line) {
   const op = line.split(/\s+/)[1];
-  return op === "Q" || op === "STATE" ? "status" : "other";
+  return ["Q", "STATE", "W", "SW"].includes(op) ? "status" : "other";
 }
 
 function addSerial(entry) {
@@ -263,7 +263,7 @@ function addSerial(entry) {
   const time = new Date(entry.t * 1000).toTimeString().slice(0, 8);
   const op = entry.line.split(/\s+/)[1];
   const isErr = op === "ERR" || entry.line.startsWith("FAIL");
-  const isCmd = entry.dir === "out" && ["G", "S", "V", "H"].includes(op);
+  const isCmd = entry.dir === "out" && ["G", "F", "Z", "S", "P", "H"].includes(op);
 
   serial.count += 1;
   $("#serial-count").textContent = `${serial.count} lines`;

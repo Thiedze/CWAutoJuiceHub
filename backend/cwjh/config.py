@@ -16,6 +16,8 @@ class Settings:
     # Number of motors the simulated Nano reports.
     sim_bays: int = 12
     db_url: str = "sqlite:///cwjh.db"
+    # Snapshots from the debug page's camera panel (outside the repo; kept: the last 30).
+    camera_dir: str = "/tmp/cwjh-camera"
     seed: bool = True
     # Time limit for quick commands (move, glass init, glass release).
     ack_timeout_s: float = 30.0
@@ -25,6 +27,13 @@ class Settings:
     # Flip every motor move. True matches the bay motor wired on the bench: positive Nano
     # steps turned it the wrong way for tilting.
     invert_direction: bool = True
+    # Homing on a switch that is pressed at rest (docs/hardware.md). Search in growing steps
+    # to both sides, up to home_search_steps away; release the switch within
+    # home_release_steps.
+    home_step_rate: int = 100
+    home_first_steps: int = 50
+    home_search_steps: int = 600
+    home_release_steps: int = 200
     # A pour turns the bay this far from rest (opposite to the bottle tilt). Calibrate!
     pour_open_steps: int = -400
     # Until there is a scale, a pour is timed with this flow. Calibrate!
@@ -39,11 +48,14 @@ class Settings:
             serial_port=_env("SERIAL_PORT", cls.serial_port),
             sim_bays=int(_env("SIM_BAYS", str(cls.sim_bays))),
             db_url=_env("DB_URL", cls.db_url),
+            camera_dir=_env("CAMERA_DIR", cls.camera_dir),
             seed=_env("SEED", "1") not in ("0", "false", "no"),
             ack_timeout_s=float(_env("ACK_TIMEOUT_S", str(cls.ack_timeout_s))),
             steps_per_degree=float(_env("STEPS_PER_DEGREE", str(cls.steps_per_degree))),
             step_rate=int(_env("STEP_RATE", str(cls.step_rate))),
             invert_direction=_env("INVERT_DIRECTION", "1") not in ("0", "false", "no"),
+            home_step_rate=int(_env("HOME_STEP_RATE", str(cls.home_step_rate))),
+            home_search_steps=int(_env("HOME_SEARCH_STEPS", str(cls.home_search_steps))),
             pour_open_steps=int(_env("POUR_OPEN_STEPS", str(cls.pour_open_steps))),
             pour_flow_ml_s=float(_env("POUR_FLOW_ML_S", str(cls.pour_flow_ml_s))),
             min_flow_ml_s=float(_env("MIN_FLOW_ML_S", str(cls.min_flow_ml_s))),

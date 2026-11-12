@@ -48,15 +48,23 @@ bool readLine() {
 
 bool pollWhileMoving();
 
-void handleGo(const Request& req) {
+// Go and Find: both move until the target; Find also ends at the home switch.
+void handleMove(const Request& req) {
+  const bool find = req.op == Op::Find;
   moving = true;
   stopRequested = false;
-  const MoveResult result = motors.moveTo(req.bay, req.value, pollWhileMoving);
+  const MoveResult result =
+      motors.moveTo(req.bay, req.value, pollWhileMoving, find ? static_cast<int8_t>(req.level) : -1);
   moving = false;
 
   switch (result) {
     case MoveResult::Done:
-      reply(formatOkValue(out, sizeof(out), req.seq, motors.position(req.bay)));
+    case MoveResult::Found:
+      if (find) {
+        reply(formatFound(out, sizeof(out), req.seq, motors.position(req.bay), result == MoveResult::Found));
+      } else {
+        reply(formatOkValue(out, sizeof(out), req.seq, motors.position(req.bay)));
+      }
       break;
     case MoveResult::Busy:
       reply(formatErr(out, sizeof(out), req.seq, "busy"));
@@ -96,27 +104,48 @@ void handle(const char* text) {
     reply(formatState(out, sizeof(out), req.seq, moving, motors.positions(), BAY_COUNT));
     return;
   }
+  if (req.op == Op::Switches) {
+    int8_t states[BAY_COUNT];
+    for (uint8_t i = 0; i < BAY_COUNT; i++) states[i] = motors.homeSwitch(i + 1);
+    reply(formatSwitches(out, sizeof(out), req.seq, states, BAY_COUNT));
+    return;
+  }
   if (moving) {
     reply(formatErr(out, sizeof(out), req.seq, "busy"));
     return;
   }
-  if ((req.op == Op::Go || req.op == Op::Hold) && req.bay > BAY_COUNT) {
+  if (req.bay > BAY_COUNT) {
     reply(formatErr(out, sizeof(out), req.seq, "no_motor"));
+    return;
+  }
+  if (req.op == Op::Find && BAY_HOME[req.bay - 1] == NO_SWITCH) {
+    reply(formatErr(out, sizeof(out), req.seq, "no_switch"));
     return;
   }
 
   switch (req.op) {
     case Op::Go:
-      handleGo(req);
+    case Op::Find:
+      handleMove(req);
+      break;
+    case Op::Zero:
+      motors.zero(req.bay);
+      reply(formatOk(out, sizeof(out), req.seq));
       break;
     case Op::Hold:
       motors.setHold(req.bay, req.value != 0);
       reply(formatOk(out, sizeof(out), req.seq));
       break;
-    case Op::Speed:
-      motors.setSpeed(static_cast<uint16_t>(req.value));
+    case Op::Profile: {
+      Profile profile;
+      profile.maxSpeed = static_cast<uint16_t>(req.value);
+      profile.minSpeed = req.minSpeed;
+      profile.startMs = req.startMs;
+      profile.endMs = req.endMs;
+      motors.setProfile(req.bay, profile);
       reply(formatOk(out, sizeof(out), req.seq));
       break;
+    }
     default:
       break;
   }

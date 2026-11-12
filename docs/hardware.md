@@ -10,7 +10,7 @@
   ENABLE line of each bay driver.
 - **DRV8825 stepper driver** per bay, one stepper motor per bay.
 
-Wired today: one bay. Planned: 12 liquid dispensers in 4 quarters of 3, a lift stepper that
+Wired today: one bay, with a home switch. Planned: 12 liquid dispensers in 4 quarters of 3, a lift stepper that
 raises the glass onto a load cell (HX711), and a LED per bay.
 
 ## Wiring
@@ -33,6 +33,7 @@ The SX1509 runs on 3.3 V. Its address is 0x3E with the ADDR jumpers untouched.
 | 1 | STEP | shared by all bays |
 | 2 | DIR | shared by all bays |
 | 3 | ENABLE of bay 1 | active low; one I/O per bay |
+| 4 | home switch of bay 1 | input with the SX1509's internal pull-up |
 
 STEP and DIR are shared because only one bay moves at a time. A bay is selected by switching
 on only its driver (ENABLE low). To add a bay, wire its ENABLE to a free SX1509 I/O and add
@@ -40,6 +41,23 @@ that number to `BAY_ENABLE` in `firmware/src/config.h`.
 
 Every STEP pulse is two I2C writes to the SX1509, so the step rate is limited to about 320
 steps per second (`I2C_CLOCK` 100 kHz; 400 kHz gives roughly three times that).
+
+### Home switch
+
+A microswitch per bay, pressed when the bay is at rest. On bay 1 a bolt on the large belt
+pulley pushes the switch's lever.
+
+- Wire the switch between its SX1509 I/O and GND, on the contacts COM and NO (marked 1 and 4
+  on the blue switch used here). Pressed then reads low.
+- No external resistor: the I/O uses the SX1509's internal pull-up to its bank supply (3.3 V
+  here), so never feed 5 V into it.
+- Mind the header order on the SX1509 breakout: 0, 1, 2, 3, VCC1, 4. I/O 4 is the row below
+  VCC1.
+- Configure it in `BAY_HOME` in `firmware/src/config.h` (`NO_SWITCH` for a bay without one).
+
+The backend homes every bay with a switch when it connects to the Nano; see
+[protocol.md](protocol.md#homing). The microswitch has a hysteresis of about 11 steps between
+pressing and releasing, which is why homing always ends on the edge seen from the tilt side.
 
 ### DRV8825
 
@@ -95,5 +113,9 @@ These are backend settings (environment variables, see the README):
 - **`CWJH_STEP_RATE`**: steps per second. Above about 320 the SX1509 cannot keep up and the
   motor just runs at its limit.
 
-Position 0 of every bay is wherever the motor is when the Nano boots, and opening the
-serial port reboots the Nano. Leave the bays at rest when stopping the backend.
+Position 0 of a bay with a home switch is the switch, found again on every connect. Without
+a switch, position 0 is wherever the motor is when the Nano boots, and opening the serial
+port reboots the Nano; leave such bays at rest when stopping the backend.
+
+- **`CWJH_HOME_STEP_RATE`** (100) and **`CWJH_HOME_SEARCH_STEPS`** (600): speed and range of
+  the homing search.

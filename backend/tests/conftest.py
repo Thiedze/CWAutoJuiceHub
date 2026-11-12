@@ -10,6 +10,7 @@ from cwjh.nano_link import NanoLink
 from cwjh.seed import seed
 from cwjh.services.bays import BayService
 from cwjh.services.cocktail import CocktailService
+from cwjh.services.motors import DefaultMotors
 from cwjh.sim.nano_sim import NanoSim
 
 # Simulated motor time runs 100x faster in tests.
@@ -40,8 +41,9 @@ class Rig:
         self.cocktail.add_listener(self.events.append)
 
     def configure(self, **changes):
-        """Change hub settings on the fly, e.g. a slower pour."""
+        """Change hub settings on the fly, e.g. a slower pour; bays use them as defaults."""
         self.hub._settings = replace(self.hub._settings, **changes)
+        self.hub._motors = DefaultMotors(self.hub._settings)
 
     async def start(self):
         await self.hub.start()
